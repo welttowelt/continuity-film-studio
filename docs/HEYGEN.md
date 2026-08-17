@@ -39,6 +39,30 @@ requires `--identity-authorized`, the same rule the asset registry applies to re
 declaration is stored beside the ids and rechecked at render time, so an unauthorized real-person presenter
 cannot reach a billable submission.
 
+## Voice tuning
+
+`heygen-configure` also accepts optional voice tuning, stored beside the presenter ids in
+`config/project.json`:
+
+```bash
+uv run continuity-film heygen-configure PROJECT --avatar-id LOOK_ID --voice-id VOICE_ID \
+  --avatar-name Ralph --platform-persona \
+  --speed 1.1 --pitch -2 --expressiveness high \
+  --engine-settings-json '{"model": "eleven_multilingual_v2", "stability": 0.35, "similarity_boost": 0.8}'
+```
+
+`--speed` (0.5 to 1.5) and `--pitch` (-50 to 50 semitones) become the payload's `voice_settings`.
+`--engine-settings-json` is an ElevenLabs passthrough inside `voice_settings.engine_settings` and accepts
+`model`, `stability`, `similarity_boost`, `style`, and `use_speaker_boost`; the numeric fields are
+range-checked to 0..1 and `engine_type` is always `elevenlabs`. HeyGen accepts `stability` values of only 0,
+0.5, or 1 with the `eleven_v3` model. `--expressiveness high|medium|low` becomes the payload's top-level
+`expressiveness` field and applies to photo avatars.
+
+Tuning lives in the project configuration, so it sits inside the hashed source state exactly like the
+presenter ids: a compiled prompt renders with the tuning it was validated against, and retuning means
+reconfiguring and recompiling. The stored values are also rechecked when the payload is built, so a
+hand-edited configuration cannot push an out-of-range value into a billable submission.
+
 ## Render
 
 ```bash

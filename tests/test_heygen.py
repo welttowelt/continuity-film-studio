@@ -7,6 +7,7 @@ import pytest
 import test_project
 
 import continuity_film_studio.heygen as heygen
+from continuity_film_studio.cli import build_parser, run
 from continuity_film_studio.io import read_json, write_json
 from continuity_film_studio.models import StudioError
 from continuity_film_studio.project import compile_prompt
@@ -158,6 +159,175 @@ def test_configure_rejects_blank_ids(tmp_path: Path) -> None:
             real_person=False,
             identity_authorized=False,
         )
+
+
+RALPH_ENGINE_SETTINGS = {
+    "model": "eleven_multilingual_v2",
+    "stability": 0.35,
+    "similarity_boost": 0.8,
+    "style": 0.2,
+    "use_speaker_boost": True,
+}
+
+
+def test_configure_stores_voice_tuning_and_payload_carries_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, shot_path = test_project.ready_project(tmp_path)
+    card = read_json(shot_path)
+    card["dialogue"] = "The pipeline is the memory."
+    write_json(shot_path, card)
+    heygen.configure_heygen(
+        project,
+        avatar_id="lk_ralph_look_1",
+        voice_id="v_ralph_voice",
+        avatar_name="Ralph",
+        real_person=False,
+        identity_authorized=False,
+        speed=1.1,
+        pitch=-2,
+        engine_settings=dict(RALPH_ENGINE_SETTINGS),
+        expressiveness="high",
+    )
+    prompt_path = compile_prompt(project, shot_path)
+    _forbid_requests(monkeypatch)
+    payload = heygen.heygen_video_payload(prompt_path)
+    assert payload["voice_settings"] == {
+        "speed": 1.1,
+        "pitch": -2,
+        "engine_settings": {"engine_type": "elevenlabs", **RALPH_ENGINE_SETTINGS},
+    }
+    assert payload["expressiveness"] == "high"
+
+
+def test_payload_omits_tuning_that_was_never_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, prompt_path = _talking_project(tmp_path)
+    _forbid_requests(monkeypatch)
+    payload = heygen.heygen_video_payload(prompt_path)
+    assert "voice_settings" not in payload
+    assert "expressiveness" not in payload
+
+
+@pytest.mark.parametrize(
+    ("tuning", "message"),
+    [
+        ({"speed": 1.6}, "voice speed"),
+        ({"speed": True}, "voice speed"),
+        ({"pitch": 51}, "voice pitch"),
+        ({"expressiveness": "maximum"}, "expressiveness must be one of"),
+        ({"engine_settings": {"reverb": 1}}, "unsupported engine settings keys: reverb"),
+        ({"engine_settings": {"engine_type": "fish"}}, "elevenlabs engine only"),
+        ({"engine_settings": {"stability": 1.5}}, "engine settings stability"),
+        ({"engine_settings": {"model": " "}}, "non-empty string"),
+        ({"engine_settings": {"use_speaker_boost": "yes"}}, "true or false"),
+        ({"engine_settings": []}, "JSON object"),
+    ],
+)
+def test_configure_rejects_invalid_voice_tuning(tmp_path: Path, tuning: dict[str, Any], message: str) -> None:
+    project, _ = test_project.ready_project(tmp_path)
+    _configure_ralph(project)
+    before = read_json(project / "config/project.json")
+    with pytest.raises(StudioError, match=message):
+        heygen.configure_heygen(
+            project,
+            avatar_id="lk_ralph_look_1",
+            voice_id="v_ralph_voice",
+            avatar_name="Ralph",
+            real_person=False,
+            identity_authorized=False,
+            **tuning,
+        )
+    assert read_json(project / "config/project.json") == before
+
+
+def test_payload_rechecks_hand_edited_voice_tuning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project, shot_path = test_project.ready_project(tmp_path)
+    card = read_json(shot_path)
+    card["dialogue"] = "Hello."
+    write_json(shot_path, card)
+    config_path = project / "config/project.json"
+    config = read_json(config_path)
+    config.setdefault("providers", {})["heygen"] = {
+        "avatar_id": "lk_x",
+        "voice_id": "v_x",
+        "presenter_rights": {"real_person": False, "identity_authorized": False},
+        "voice_settings": {"speed": 3.0},
+    }
+    write_json(config_path, config)
+    prompt_path = compile_prompt(project, shot_path)
+    _forbid_requests(monkeypatch)
+    with pytest.raises(StudioError, match="voice speed"):
+        heygen.heygen_video_payload(prompt_path)
+
+
+def test_retuning_the_voice_invalidates_compiled_prompts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, prompt_path = _talking_project(tmp_path)
+    _forbid_requests(monkeypatch)
+    assert "voice_settings" not in heygen.heygen_video_payload(prompt_path)
+    heygen.configure_heygen(
+        project,
+        avatar_id="lk_ralph_look_1",
+        voice_id="v_ralph_voice",
+        avatar_name="Ralph",
+        real_person=False,
+        identity_authorized=False,
+        speed=0.9,
+    )
+    with pytest.raises(StudioError, match="source state changed"):
+        heygen.heygen_video_payload(prompt_path)
+
+
+def test_cli_configure_wires_voice_tuning_flags(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    project, _ = test_project.ready_project(tmp_path)
+    argv = [
+        "heygen-configure",
+        str(project),
+        "--avatar-id",
+        "lk_ralph_look_1",
+        "--voice-id",
+        "v_ralph_voice",
+        "--avatar-name",
+        "Ralph",
+        "--platform-persona",
+        "--speed",
+        "1.1",
+        "--pitch",
+        "-2",
+        "--expressiveness",
+        "high",
+        "--engine-settings-json",
+        '{"stability": 0.35, "use_speaker_boost": true}',
+    ]
+    assert run(build_parser().parse_args(argv)) == 0
+    provider = read_json(project / "config/project.json")["providers"]["heygen"]
+    assert provider["voice_settings"] == {
+        "speed": 1.1,
+        "pitch": -2.0,
+        "engine_settings": {"engine_type": "elevenlabs", "stability": 0.35, "use_speaker_boost": True},
+    }
+    assert provider["expressiveness"] == "high"
+    capsys.readouterr()
+
+
+def test_cli_configure_rejects_invalid_engine_settings_json(tmp_path: Path) -> None:
+    project, _ = test_project.ready_project(tmp_path)
+    argv = [
+        "heygen-configure",
+        str(project),
+        "--avatar-id",
+        "lk_ralph_look_1",
+        "--voice-id",
+        "v_ralph_voice",
+        "--platform-persona",
+        "--engine-settings-json",
+        "{not json",
+    ]
+    with pytest.raises(StudioError, match="not valid JSON"):
+        run(build_parser().parse_args(argv))
 
 
 def _record_submission(project: Path, video_id: str) -> None:

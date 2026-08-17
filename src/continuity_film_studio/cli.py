@@ -174,6 +174,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="the real person has explicitly authorized this presenter",
     )
+    heygen_configure.add_argument("--speed", type=float, help="voice speed multiplier, 0.5 to 1.5")
+    heygen_configure.add_argument("--pitch", type=float, help="voice pitch offset in semitones, -50 to 50")
+    heygen_configure.add_argument(
+        "--expressiveness",
+        choices=("high", "medium", "low"),
+        help="avatar expressiveness level (photo avatars only)",
+    )
+    heygen_configure.add_argument(
+        "--engine-settings-json",
+        help='inline JSON of ElevenLabs engine settings, e.g. \'{"model": "eleven_v3", "stability": 0.5}\'',
+    )
 
     heygen_render = subparsers.add_parser("heygen-render", help="preview or execute a HeyGen submission")
     heygen_render.add_argument("--prompt", required=True)
@@ -288,6 +299,12 @@ def run(args: argparse.Namespace) -> int:
     elif command == "heygen-voices":
         print(json.dumps(heygen_voices(), indent=2, sort_keys=True))
     elif command == "heygen-configure":
+        engine_settings = None
+        if args.engine_settings_json:
+            try:
+                engine_settings = json.loads(args.engine_settings_json)
+            except json.JSONDecodeError as exc:
+                raise StudioError(f"--engine-settings-json is not valid JSON: {exc}") from exc
         configure_heygen(
             _path(args.project),
             avatar_id=args.avatar_id,
@@ -295,6 +312,10 @@ def run(args: argparse.Namespace) -> int:
             avatar_name=args.avatar_name,
             real_person=args.real_person,
             identity_authorized=args.identity_authorized,
+            speed=args.speed,
+            pitch=args.pitch,
+            engine_settings=engine_settings,
+            expressiveness=args.expressiveness,
         )
         print(f"configured heygen presenter for {_path(args.project)}")
     elif command == "heygen-render":

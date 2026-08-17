@@ -54,3 +54,23 @@ compare all seven `SKILL.md` files, run the full test suite, and then record the
 The recorded pin lives in `docs/upstream-pin.json` (submodule commit plus a sha256 per upstream `SKILL.md`).
 `scripts/check_upstream_pin.py` verifies the checkout against it, CI runs the check on every push, and
 `--write` records the newly reviewed state after an intentional update.
+
+## Naming map
+
+The JSON schemas keep upstream's counts, order, and lane boundaries exactly. Eight shot-card keys differ from a
+mechanical snake_casing of the upstream field labels:
+
+| Upstream label | JSON key |
+|---|---|
+| Scene / shot ID | `shot_id` |
+| Characters with asset tags and state variants | `characters` |
+| Verbatim dialogue | `dialogue` |
+| Running time | `duration_seconds` |
+| Shot goal | `goal` |
+| Task as a verb | `task_verb` |
+| Size | `shot_size` |
+| Movement | `camera_movement` |
+
+Visual-bible decision keys rename three upstream style categories: light becomes `lighting`, color becomes
+`palette`, and cutting tempo becomes `edit_tempo`. The eighth key, `style`, is a local addition with no upstream
+counterpart, and approval requires it, which is stricter than upstream.

@@ -1,0 +1,27 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+.pytest_cache/
+.ruff_cache/
+.venv/
+__pycache__/
+*.egg-info/
+dist/
+build/
+
+# Production media and private references never belong in this repository.
+*.avi
+*.gif
+*.jpeg
+*.jpg
+*.m4a
+*.mov
+*.mp3
+*.mp4
+*.png
+*.prores
+*.wav
+*.webm
+productions/
+credentials.json

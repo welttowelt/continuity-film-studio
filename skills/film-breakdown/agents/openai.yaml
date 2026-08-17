@@ -1,0 +1,4 @@
+interface:
+  display_name: "Film Breakdown"
+  short_description: "Turn scripts into complete shot cards"
+  default_prompt: "Use $film-breakdown to convert this idea or script into production-ready shot cards."

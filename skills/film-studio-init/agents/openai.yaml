@@ -1,0 +1,4 @@
+interface:
+  display_name: "Film Studio Init"
+  short_description: "Create a continuity-first studio workspace"
+  default_prompt: "Use $film-studio-init to create a new continuity-first film workspace."

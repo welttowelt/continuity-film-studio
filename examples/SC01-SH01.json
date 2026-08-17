@@ -1,0 +1,32 @@
+{
+  "acting": "Cal pauses, glances at the cup, then looks back at the other character without speaking.",
+  "angle": "eye level",
+  "blocking": "Cal stands 1.5 metres from the table; the cup stays at frame right.",
+  "camera_movement": "slow 40-centimetre push-in timed to Cal's glance",
+  "characters": [
+    {
+      "state": "base",
+      "tag": "@cal"
+    }
+  ],
+  "complexity": "medium",
+  "cut_type": "hard cut",
+  "description": "Cal notices the cup.",
+  "dialogue": "",
+  "dramaturgy": "recognition",
+  "duration_seconds": 6,
+  "goal": "Reveal that Cal recognizes the object without explaining why.",
+  "lens": "50mm",
+  "location": "@kitchen_night",
+  "pace": "restrained",
+  "props": [
+    "@red_cup"
+  ],
+  "shot_id": "SC01-SH01",
+  "shot_size": "medium close-up",
+  "style_device": "single motivated push-in",
+  "task_verb": "recognizes",
+  "text_tasks": [],
+  "time_of_day": "night",
+  "transition": "cut on Cal's returning eyeline"
+}

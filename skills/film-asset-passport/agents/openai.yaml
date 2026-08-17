@@ -1,0 +1,4 @@
+interface:
+  display_name: "Film Asset Passport"
+  short_description: "Build versioned character and scene passports"
+  default_prompt: "Use $film-asset-passport to create a locked identity passport for this asset."

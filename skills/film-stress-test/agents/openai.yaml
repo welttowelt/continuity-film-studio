@@ -1,0 +1,4 @@
+interface:
+  display_name: "Film Stress Test"
+  short_description: "Test continuity before video generation"
+  default_prompt: "Use $film-stress-test to test this asset across its real production conditions."

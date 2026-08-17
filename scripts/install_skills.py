@@ -12,6 +12,8 @@ def main() -> int:
 
     repository = Path(__file__).resolve().parents[1]
     source_root = repository / "skills"
+    if not source_root.is_dir():
+        raise SystemExit(f"repository skills directory is missing: {source_root}")
     target_root = Path(args.target).expanduser().resolve()
     target_root.mkdir(parents=True, exist_ok=True)
 
@@ -23,7 +25,10 @@ def main() -> int:
             print(f"already installed: {source.name}")
             continue
         if target.exists() or target.is_symlink():
-            raise SystemExit(f"refusing to replace existing skill: {target}")
+            raise SystemExit(
+                f"refusing to replace existing skill: {target}\n"
+                f"remove it first if the replacement is deliberate: rm -r {target}"
+            )
         target.symlink_to(source, target_is_directory=True)
         print(f"installed: {source.name}")
     return 0

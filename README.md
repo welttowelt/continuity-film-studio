@@ -1,8 +1,8 @@
 # Continuity Film Studio
 
 A provider-aware enforcement layer for [Machina's seven film-studio
-skills](https://github.com/machina-exm/film-studio-skills). The upstream skills run the creative workflow; this
-repository turns their approved decisions into enforceable project state: shot cards, visual locks, asset
+skills](https://github.com/machina-exm/film-studio-skills). The upstream skills run the creative workflow. This
+repository records their approved decisions as enforceable project state: shot cards, visual locks, asset
 passports, stress tests, generation gates, fixed prompt blocks, immutable attempt logs, and checklist-controlled
 selects.
 
@@ -12,13 +12,12 @@ and state changes consistent across a production.
 
 ## Architecture
 
-The video model does not remember a prior actor, location, or prop. The production files hold that continuity.
+The video model remembers no prior actor, location, or prop, so the production files hold that continuity.
 The named model and platform can change without changing the system.
 
 The repository pins Machina's unmodified upstream skills as a Git submodule. It adds one local skill,
-`continuity-film-enforcer`, plus a tested CLI. The overlay does not pretend to be an eighth creative stage and
-does not silently convert upstream Markdown: it mirrors approved state into JSON, validates it, and preserves an
-audit trail.
+`continuity-film-enforcer`, plus a tested CLI. The overlay mirrors approved state into JSON, validates it, and
+preserves an audit trail. It adds no eighth creative stage and never silently converts upstream Markdown.
 
 The marketing claims are not treated as evidence. This project does **not** claim that a workflow has a $2M
 budget, that a specific model is exclusive to one provider, or that a model can reliably one-shot a finished
@@ -36,11 +35,12 @@ budget, that a specific model is exclusive to one provider, or that a model can 
 - Completed all-pass matrices and an explicit decision for location and prop locks
 - A hard scene gate: no compiled generation prompt until every referenced asset is locked
 - Machina's exact 15-block positive prompt order
-- 10–15 second shots and 0.3–0.8 second action beats
-- One-block-change enforcement between attempts
-- Automatic “simplify the shot” flag on rejected attempt 15
-- Checklist-controlled promotion from `generations/` to `selects/`
-- A read-only project audit
+- 10 to 15 second shots and 0.3 to 0.8 second action beats
+- One-line-change enforcement between attempts, recomputed from the compiled prompt text
+- Automatic “simplify the shot” flag on rejected attempt 15, with audit warnings from attempt 10
+- Checklist-controlled promotion from `generations/` into per-scene `selects/` folders
+- A read-only project audit that re-verifies locked-asset stress evidence
+- A pinned-upstream drift guard, `scripts/check_upstream_pin.py`, enforced in CI
 - A Higgsfield adapter that discovers the live catalog instead of hardcoding model names
 
 Editing, cleanup, color, sound, and mastering remain human-approved stages.
@@ -61,15 +61,19 @@ uv run continuity-film shot-template productions/demo --shot-id SC01-SH01
 uv run continuity-film audit productions/demo
 ```
 
-Install Machina's seven skills and the local enforcement overlay:
+**Claude Code needs no install step.** The repository ships `.claude/skills/` with relative symlinks to all
+eight skills (Machina's seven plus the enforcer), so any session started inside a recursive clone has them
+project-scoped, and no skill leaks into the global namespace. Symlinks require a POSIX checkout.
+
+For Codex, install the seven upstream skills and the local enforcement overlay:
 
 ```bash
 npx skills add ./upstream/machina-film-studio-skills
 uv run python scripts/install_skills.py
 ```
 
-Select all seven upstream skills for Codex in the installer. The local installer only adds
-`continuity-film-enforcer` and refuses to replace any existing skill.
+The local installer only adds `continuity-film-enforcer` as a symlink and refuses to replace any existing
+skill.
 
 The first audit is expected to show draft state. Run the upstream workflow in this order:
 
@@ -90,7 +94,7 @@ boundary.
 ## Higgsfield
 
 Machina's skills are provider-neutral and explicitly ask which stack the project uses. Higgsfield is an optional
-render adapter at the edge; it is not the source of continuity truth.
+render adapter at the edge. The production files remain the source of continuity truth.
 
 Install and authenticate the official CLI only when you are ready to generate:
 
@@ -116,4 +120,8 @@ footage, voices, music, and distribution permissions still require a human right
 uv run ruff check .
 uv run ruff format --check .
 uv run pytest
+uv run python scripts/check_upstream_pin.py
 ```
+
+The last command verifies that the checked-out submodule still matches the reviewed pin in
+`docs/upstream-pin.json`. After a deliberate upstream review, rerun it with `--write` to record the new state.

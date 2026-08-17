@@ -1,0 +1,12 @@
+{
+  "submodule_commit": "314517381b1be72c1404c068a9e37a064ec4215c",
+  "skill_files": {
+    "asset-passport": "ec7697e345228c89dcced4abef6bb4f10dd04426450bd517a30f88c36841940c",
+    "film-breakdown": "c5af73d96f1ee5586893fe49c495742a931a5a9a9b8ad9a744156ce0bffca30b",
+    "reference-board": "889f224acfa8ea20fc33648e2cf62b61d1271d4b5c9c4a819e32b6e9d185cd31",
+    "setup": "f16ef3314708aeb21d6a7c381c035b80e56807e3ce8073da820ce7f6eab23bc8",
+    "shot-prompt": "af33f9da34bd2c78b7c31ac7e69e1d9ad1ad1e368495da156d6ef902e7b4b445",
+    "stress-test": "6bf40841cf302d62f514a157bd9986f7c298fd15ae8590ad2fe4abb3bdf477d8",
+    "studio-init": "fa55e9e7f9c152ee650824171c445803a3ea1f0fa6d978b0c9e4eeb7db8e3d36"
+  }
+}

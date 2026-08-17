@@ -33,3 +33,5 @@ jobs:
           for skill in upstream/machina-film-studio-skills/skills/*; do
             python scripts/quick_validate_skill.py --source-only "$skill"
           done
+      - name: Verify upstream pin manifest
+        run: uv run python scripts/check_upstream_pin.py

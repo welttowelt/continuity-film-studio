@@ -65,6 +65,7 @@ QA_FIELDS = (
     "camera_match",
     "performance_match",
     "neighbor_cut_match",
+    "palette_match",
 )
 
 
@@ -103,13 +104,29 @@ def validate_shot_card(card: dict[str, Any]) -> list[str]:
 
     if not isinstance(card["characters"], list):
         errors.append("characters must be a list")
+    elif not card["characters"]:
+        errors.append("characters must name at least one character")
     else:
         for character in card["characters"]:
             if not isinstance(character, dict) or not character.get("tag"):
                 errors.append("each character must contain a tag")
 
+    location = card["location"]
+    location_valid = (isinstance(location, str) and location.strip()) or (
+        isinstance(location, dict) and str(location.get("tag", "")).strip()
+    )
+    if not location_valid:
+        errors.append("location must be a tag string or an object with a tag")
+
     if not isinstance(card["props"], list):
         errors.append("props must be a list")
+    else:
+        for prop in card["props"]:
+            prop_valid = (isinstance(prop, str) and prop.strip()) or (
+                isinstance(prop, dict) and str(prop.get("tag", "")).strip()
+            )
+            if not prop_valid:
+                errors.append("each prop must be a tag string or an object with a tag")
 
     duration = card["duration_seconds"]
     if not isinstance(duration, (int, float)) or not 10 <= duration <= 15:

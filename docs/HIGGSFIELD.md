@@ -1,7 +1,7 @@
 # Higgsfield adapter
 
-Higgsfield is one generation provider, not the source of production truth. The project registry and passports
-remain portable if the video model changes.
+Higgsfield is one generation provider. Production truth lives in the project registry and passports, which stay
+portable if the video model changes.
 
 ## Related public projects
 
@@ -10,7 +10,7 @@ remain portable if the video model changes.
 - Machina film-studio skills: <https://github.com/machina-exm/film-studio-skills>
 - npm package: <https://www.npmjs.com/package/@higgsfield/cli>
 
-The seven pre-production skills come from Machina, not Higgsfield's official skills repository. They are
+The seven pre-production skills come from Machina rather than Higgsfield's official skills repository. They are
 provider-neutral: `setup` asks which image and video stack the user operates and does not recommend a model. This
 repository pins Machina's upstream and adds deterministic continuity checks. It calls the official Higgsfield CLI
 only when Higgsfield is the selected render provider.
@@ -47,8 +47,8 @@ Inspect the chosen model schema and map every compiled reference to the correspo
 }
 ```
 
-The flags above are only examples. Use `higgsfield model get <model> --json`; do not guess them. Preview the exact
-argument array without spending credits:
+The flags above are only examples. Use `higgsfield model get <model> --json` and never guess them. Preview the
+exact argument array without spending credits:
 
 ```bash
 continuity-film higgsfield-render \

@@ -13,6 +13,7 @@ build/
 # Production media and private references never belong in this repository.
 *.avi
 *.gif
+*.heic
 *.jpeg
 *.jpg
 *.m4a
@@ -21,7 +22,10 @@ build/
 *.mp4
 *.png
 *.prores
+*.tiff
 *.wav
 *.webm
+*.webp
 productions/
 credentials.json
+.coverage

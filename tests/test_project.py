@@ -280,9 +280,129 @@ def test_accept_take_requires_complete_qa(tmp_path: Path) -> None:
         allow_identical=False,
     )
     selected = accept_take(project, "SC01-SH01", 1)
+    assert selected.parent.name == "sc01"
     assert selected.read_bytes() == result.read_bytes()
     with pytest.raises(StudioError, match="will not be overwritten"):
         accept_take(project, "SC01-SH01", 1)
+
+
+def test_attempt_log_enforces_one_changed_line(tmp_path: Path) -> None:
+    project, shot_path = ready_project(tmp_path)
+    prompt_1 = compile_prompt(project, shot_path)
+    result = project / "generations/attempt.bin"
+    result.write_bytes(b"attempt")
+    log_attempt(
+        project,
+        shot_id="SC01-SH01",
+        prompt_path=prompt_1,
+        result_path=result,
+        verdict="rejected",
+        changed_block="initial",
+        qa=None,
+        allow_identical=False,
+    )
+    card = read_json(shot_path)
+    card["acting"] = "Cal blinks once.\nCal tightens his jaw.\nCal exhales."
+    write_json(shot_path, card)
+    prompt_2 = compile_prompt(project, shot_path)
+    with pytest.raises(StudioError, match="more than one prompt line changed"):
+        log_attempt(
+            project,
+            shot_id="SC01-SH01",
+            prompt_path=prompt_2,
+            result_path=result,
+            verdict="rejected",
+            changed_block="character_acting",
+            qa=None,
+            allow_identical=False,
+        )
+
+
+def test_attempt_log_detects_tampered_prompt_hashes(tmp_path: Path) -> None:
+    project, shot_path = ready_project(tmp_path)
+    prompt_path = compile_prompt(project, shot_path)
+    result = project / "generations/attempt.bin"
+    result.write_bytes(b"attempt")
+    prompt = read_json(prompt_path)
+    prompt["blocks"][10]["text"] = "Silently rewritten audio block."
+    write_json(prompt_path, prompt)
+    with pytest.raises(StudioError, match="do not match the block text"):
+        log_attempt(
+            project,
+            shot_id="SC01-SH01",
+            prompt_path=prompt_path,
+            result_path=result,
+            verdict="rejected",
+            changed_block="initial",
+            qa=None,
+            allow_identical=False,
+        )
+
+
+def test_attempt_result_must_live_in_generations(tmp_path: Path) -> None:
+    project, shot_path = ready_project(tmp_path)
+    prompt_path = compile_prompt(project, shot_path)
+    stray = tmp_path / "stray.bin"
+    stray.write_bytes(b"stray")
+    with pytest.raises(StudioError, match="inside generations/"):
+        log_attempt(
+            project,
+            shot_id="SC01-SH01",
+            prompt_path=prompt_path,
+            result_path=stray,
+            verdict="rejected",
+            changed_block="initial",
+            qa=None,
+            allow_identical=False,
+        )
+
+
+def test_locked_asset_refuses_stress_rerecord(tmp_path: Path) -> None:
+    project, _ = ready_project(tmp_path)
+    report = read_json(
+        project / "assets/characters/cal/stress-test.json",
+    )
+    with pytest.raises(StudioError, match="stress evidence is frozen"):
+        record_stress_test(project, "@cal", report)
+
+
+def test_audit_flags_locked_asset_with_degraded_evidence(tmp_path: Path) -> None:
+    project, _ = ready_project(tmp_path)
+    stress_path = project / "assets/characters/cal/stress-test.json"
+    evidence = read_json(stress_path)
+    evidence["cases"][0]["verdict"] = "miss"
+    write_json(stress_path, evidence)
+    report = audit_project(project)
+    assert not report.passed
+    assert any("lost its 10/10 evidence" in error for error in report.errors)
+
+
+def test_variant_of_requires_registered_base(tmp_path: Path) -> None:
+    project = tmp_path / "production"
+    init_project(project, "Test", "higgsfield", "internal")
+    reference = project / "references/cal.ref"
+    reference.parent.mkdir(parents=True, exist_ok=True)
+    reference.write_text("reference", encoding="utf-8")
+    with pytest.raises(StudioError, match="unregistered asset"):
+        add_asset(
+            project,
+            tag="@cal_wet",
+            asset_type="character",
+            descriptor="Wet variant of Cal.",
+            references=[reference],
+            scenes=["SC01"],
+            variant_of="@cal",
+            rights_state="confirmed",
+            real_person=False,
+            identity_authorized=False,
+        )
+
+
+def test_board_decision_rejects_unknown_status(tmp_path: Path) -> None:
+    board_path = tmp_path / "board.json"
+    write_json(board_path, reference_board_template("style", "style"))
+    with pytest.raises(StudioError, match="unsupported board status"):
+        decide_reference_board(board_path, "maybe", "undecided")
 
 
 def test_rejected_attempt_15_stops_further_iteration(tmp_path: Path) -> None:

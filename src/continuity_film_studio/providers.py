@@ -50,14 +50,14 @@ def higgsfield_model_catalog() -> Any:
 def higgsfield_args(prompt_path: Path, model: str, attachment_map: dict[str, str] | None = None) -> list[str]:
     prompt = read_json(prompt_path)
     if not model:
-        raise StudioError("choose a model from the live `higgsfield model list` catalog")
+        raise StudioError("a model name is required")
     attachments = prompt.get("attachments", [])
     if attachments and attachment_map is None:
         raise StudioError(
             "compiled prompt has reference attachments; provide a model-specific attachment map "
             "after inspecting `higgsfield model get <model> --json`"
         )
-    binary = shutil.which("higgsfield") or "higgsfield"
+    binary = shutil.which("higgsfield") or shutil.which("hf") or "higgsfield"
     args = [
         binary,
         "generate",

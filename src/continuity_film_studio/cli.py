@@ -15,6 +15,7 @@ from .project import (
     compile_prompt,
     decide_reference_board,
     dump_report,
+    ensure_project,
     gate_shot,
     init_project,
     link_visual_bible_board,
@@ -32,6 +33,12 @@ def _path(value: str) -> Path:
     return Path(value).expanduser().resolve()
 
 
+def _write_template(output: Path, value: dict, force: bool) -> None:
+    if output.exists() and not force:
+        raise StudioError(f"refusing to overwrite an existing file without --force: {output}")
+    write_json(output, value)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="continuity-film", description="Continuity-first AI film tooling")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -46,12 +53,14 @@ def build_parser() -> argparse.ArgumentParser:
     shot.add_argument("project")
     shot.add_argument("--shot-id", required=True)
     shot.add_argument("--output")
+    shot.add_argument("--force", action="store_true", help="replace an existing template file")
 
     board = subparsers.add_parser("board-template", help="write a reference-board template")
     board.add_argument("project")
     board.add_argument("--name", required=True)
     board.add_argument("--type", required=True)
     board.add_argument("--output")
+    board.add_argument("--force", action="store_true", help="replace an existing template file")
 
     decide = subparsers.add_parser("board-decide", help="record a written board decision")
     decide.add_argument("board")
@@ -82,6 +91,7 @@ def build_parser() -> argparse.ArgumentParser:
     stress.add_argument("project")
     stress.add_argument("--tag", required=True)
     stress.add_argument("--output")
+    stress.add_argument("--force", action="store_true", help="replace an existing template file")
 
     stress_record = subparsers.add_parser("stress-record", help="record stress-test results")
     stress_record.add_argument("project")
@@ -135,16 +145,16 @@ def run(args: argparse.Namespace) -> int:
         init_project(_path(args.project), args.name, args.provider, args.distribution)
         print(_path(args.project))
     elif command == "shot-template":
-        project = _path(args.project)
+        project = ensure_project(_path(args.project))
         output = (
             _path(args.output) if args.output else project / "prompts/shot-cards" / f"{args.shot_id}.json"
         )
-        write_json(output, shot_template(args.shot_id))
+        _write_template(output, shot_template(args.shot_id), args.force)
         print(output)
     elif command == "board-template":
-        project = _path(args.project)
+        project = ensure_project(_path(args.project))
         output = _path(args.output) if args.output else project / "references/boards" / f"{args.name}.json"
-        write_json(output, reference_board_template(args.name, args.type))
+        _write_template(output, reference_board_template(args.name, args.type), args.force)
         print(output)
     elif command == "board-decide":
         decide_reference_board(_path(args.board), args.status, args.decision)
@@ -177,7 +187,7 @@ def run(args: argparse.Namespace) -> int:
             if args.output
             else project / "assets" / f"{args.tag.removeprefix('@')}-stress.json"
         )
-        write_json(output, stress_template(project, args.tag))
+        _write_template(output, stress_template(project, args.tag), args.force)
         print(output)
     elif command == "stress-record":
         output = record_stress_test(_path(args.project), args.tag, read_json(_path(args.results)))

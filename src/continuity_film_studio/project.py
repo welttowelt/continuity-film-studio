@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import json
 import shutil
 from pathlib import Path
@@ -101,7 +102,8 @@ def init_project(project: Path, name: str, provider: str, distribution: str) -> 
     )
     (project / "docs/generation-log.jsonl").touch()
     (project / "docs/breakdown.md").write_text(
-        "# Breakdown\n\n| scene id | summary | location | time | characters | props | shot cards | status |\n"
+        "# Breakdown\n\n"
+        "| scene id | summary | location | time of day | characters | props | shot-card file | status |\n"
         "|---|---|---|---|---|---|---|---|\n",
         encoding="utf-8",
     )
@@ -110,7 +112,7 @@ def init_project(project: Path, name: str, provider: str, distribution: str) -> 
         encoding="utf-8",
     )
     (project / "docs/registry.md").write_text(
-        "# Asset registry\n\n| tag | type | version | status | passport | scenes |\n"
+        "# Asset registry\n\n| tag | type | version | seed file | scenes | status |\n"
         "|---|---|---|---|---|---|\n",
         encoding="utf-8",
     )
@@ -126,9 +128,11 @@ def init_project(project: Path, name: str, provider: str, distribution: str) -> 
     (project / "AGENTS.md").write_text(
         "# Production laws\n\n"
         "- No generation before the bible and every referenced asset are locked.\n"
-        "- Never rename a reference file; add a version.\n"
-        "- Raw output stays in generations. Only accepted takes enter selects.\n"
-        "- Change no more than one prompt block per attempt. Simplify at attempt 15.\n"
+        "- Never rename a reference file. A new version is a new file.\n"
+        "- Raw output stays in generations/ and only the prompt engineer works there.\n"
+        "- The edit stage reads only selects/. Only checklist-accepted takes enter it.\n"
+        "- Change exactly one prompt line per attempt and keep every other line verbatim.\n"
+        "- Rejected attempts 10 to 15 call for a simpler shot. Attempt 15 is the hard stop.\n"
         "- Keep required on-screen text for the edit.\n"
         "- Confirm identity and media rights before distribution.\n",
         encoding="utf-8",
@@ -191,6 +195,8 @@ def reference_board_template(name: str, board_type: str) -> dict[str, Any]:
 
 
 def decide_reference_board(path: Path, status: str, decision: str) -> None:
+    if status not in {"approved", "revise", "rejected"}:
+        raise StudioError(f"unsupported board status: {status}")
     board = read_json(path)
     if status == "approved":
         references = board.get("references", [])
@@ -311,6 +317,8 @@ def add_asset(
     registry = read_json(registry_path)
     if any(row["tag"] == tag for row in registry["assets"]):
         raise StudioError(f"asset already exists: {tag}")
+    if variant_of is not None and not any(row["tag"] == variant_of for row in registry["assets"]):
+        raise StudioError(f"variant_of references an unregistered asset: {variant_of}")
 
     directory = _asset_dir(project, asset_type, tag)
     directory.mkdir(parents=True, exist_ok=True)
@@ -380,6 +388,11 @@ def stress_template(project: Path, tag: str) -> dict[str, Any]:
 def record_stress_test(project: Path, tag: str, results: dict[str, Any]) -> Path:
     project = ensure_project(project)
     row = registry_row(project, tag)
+    if row.get("status") == "locked":
+        raise StudioError(
+            f"asset is locked and its stress evidence is frozen: {tag}. "
+            "Deliberately set the registry row and passport back to draft before re-recording."
+        )
     if results.get("asset_tag") != tag:
         raise StudioError("stress-test asset tag does not match")
     if not isinstance(results.get("cases"), list):
@@ -515,6 +528,41 @@ def _prop_descriptors(project: Path, card: dict[str, Any]) -> str:
         tag = prop if isinstance(prop, str) else prop["tag"]
         lines.append(f"{tag}: {_passport(project, tag)['descriptor']}")
     return "\n".join(lines)
+
+
+def _render_text(blocks: list[dict[str, Any]]) -> str:
+    return "\n\n".join(
+        f"[{index + 1:02d} {block['name']}]\n{block['text']}" for index, block in enumerate(blocks)
+    )
+
+
+def _verify_prompt_integrity(prompt: dict[str, Any], prompt_path: Path) -> None:
+    blocks = prompt.get("blocks", [])
+    computed_hashes = {block["name"]: sha256_text(block["text"]) for block in blocks}
+    if computed_hashes != prompt.get("block_hashes"):
+        raise StudioError(f"prompt block hashes do not match the block text, recompile: {prompt_path}")
+    render_text = prompt.get("render_text", "")
+    if render_text != _render_text(blocks) or sha256_text(render_text) != prompt.get("render_text_sha256"):
+        raise StudioError(f"prompt render text does not match its blocks, recompile: {prompt_path}")
+
+
+def _changed_lines(previous_text: str, current_text: str) -> tuple[int, int, str | None]:
+    matcher = difflib.SequenceMatcher(
+        None, previous_text.splitlines(), current_text.splitlines(), autojunk=False
+    )
+    removed = 0
+    added = 0
+    changed_line: str | None = None
+    for operation, old_start, old_end, new_start, new_end in matcher.get_opcodes():
+        if operation == "equal":
+            continue
+        removed += old_end - old_start
+        added += new_end - new_start
+        if new_end > new_start:
+            changed_line = current_text.splitlines()[new_end - 1]
+        elif changed_line is None:
+            changed_line = f"[removed] {previous_text.splitlines()[old_end - 1]}"
+    return removed, added, changed_line
 
 
 def compile_prompt(project: Path, shot_path: Path) -> Path:
@@ -684,9 +732,7 @@ def compile_prompt(project: Path, shot_path: Path) -> Path:
     ]
     if tuple(block["name"] for block in blocks) != PROMPT_BLOCK_NAMES:
         raise StudioError("compiled prompt block order drifted from the schema")
-    render_text = "\n\n".join(
-        f"[{index + 1:02d} {block['name']}]\n{block['text']}" for index, block in enumerate(blocks)
-    )
+    render_text = _render_text(blocks)
     output_dir = project / "prompts/compiled"
     existing = sorted(output_dir.glob(f"{card['shot_id']}-v*.json"))
     version = len(existing) + 1
@@ -723,8 +769,13 @@ def log_attempt(
     prompt = read_json(prompt_path)
     if prompt.get("shot_id") != shot_id:
         raise StudioError("prompt shot id does not match")
+    _verify_prompt_integrity(prompt, prompt_path)
     if not result_path.is_file():
         raise StudioError(f"result file does not exist: {result_path}")
+    try:
+        result_path.resolve().relative_to((project / "generations").resolve())
+    except ValueError as exc:
+        raise StudioError(f"result file must live inside generations/: {result_path}") from exc
     if verdict not in {"accepted", "rejected"}:
         raise StudioError("verdict must be accepted or rejected")
     if verdict == "accepted":
@@ -736,6 +787,7 @@ def log_attempt(
     if attempts and attempts[-1].get("simplify_required"):
         raise StudioError("attempt 15 was rejected; simplify or split the shot under a new shot id")
     changed_names: list[str] = []
+    changed_line: str | None = None
     if attempts:
         previous_hashes = attempts[-1]["block_hashes"]
         changed_names = [
@@ -743,16 +795,23 @@ def log_attempt(
         ]
         if len(changed_names) > 1:
             raise StudioError(f"more than one prompt block changed: {', '.join(changed_names)}")
+        previous_prompt_path = project / attempts[-1]["prompt_file"]
+        if not previous_prompt_path.is_file():
+            raise StudioError(f"previous attempt prompt file is missing: {previous_prompt_path}")
+        removed, added, changed_line = _changed_lines(
+            read_json(previous_prompt_path).get("render_text", ""), prompt["render_text"]
+        )
+        if removed > 1 or added > 1:
+            raise StudioError(
+                "more than one prompt line changed. The upstream law is one changed line per attempt "
+                "with every other line kept verbatim"
+            )
         if not changed_names and not allow_identical:
             raise StudioError("no prompt block changed; use --allow-identical for a seed-only rerun")
         if changed_names and changed_block != changed_names[0]:
             raise StudioError(f"declared changed block does not match content: {changed_names[0]}")
 
     attempt = len(attempts) + 1
-    try:
-        result_value = relative_to_project(project, result_path)
-    except ValueError:
-        result_value = str(result_path.resolve())
     row = {
         "shot_id": shot_id,
         "attempt": attempt,
@@ -762,9 +821,11 @@ def log_attempt(
         "block_hashes": prompt["block_hashes"],
         "changed_block": changed_block,
         "detected_changed_blocks": changed_names,
-        "result_file": result_value,
+        "changed_line": changed_line,
+        "result_file": relative_to_project(project, result_path),
         "verdict": verdict,
         "qa": qa or {},
+        "simplify_recommended": verdict == "rejected" and attempt >= 10,
         "simplify_required": verdict == "rejected" and attempt >= 15,
     }
     append_jsonl(log_path, row)
@@ -784,11 +845,19 @@ def accept_take(project: Path, shot_id: str, attempt_number: int) -> Path:
     if row["verdict"] != "accepted" or any(row.get("qa", {}).get(field) is not True for field in QA_FIELDS):
         raise StudioError("take is not checklist-approved")
     source = Path(row["result_file"])
-    if not source.is_absolute():
-        source = project / source
+    if source.is_absolute():
+        raise StudioError(f"attempt result lives outside the project and cannot be promoted: {source}")
+    source = (project / source).resolve()
+    try:
+        source.relative_to((project / "generations").resolve())
+    except ValueError as exc:
+        raise StudioError(f"accepted result must live inside generations/: {source}") from exc
     if not source.is_file():
         raise StudioError(f"accepted result file is missing: {source}")
-    output = project / "selects" / f"{shot_id}-A{attempt_number:02d}{source.suffix.lower()}"
+    scene = shot_id.split("-")[0].lower()
+    output_dir = project / "selects" / scene
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output = output_dir / f"{shot_id}-A{attempt_number:02d}{source.suffix.lower()}"
     if output.exists():
         raise StudioError(f"select already exists and will not be overwritten: {output}")
     shutil.copy2(source, output)
@@ -817,15 +886,39 @@ def audit_project(project: Path) -> GateReport:
                 errors.append(f"missing reference for {row['tag']}: {reference}")
         if row.get("status") == "locked" and passport.get("status") != "locked":
             errors.append(f"registry/passport status mismatch: {row['tag']}")
+        if row.get("status") == "locked":
+            stress_value = row.get("stress_test_file")
+            stress_path = (project / stress_value) if stress_value else None
+            if stress_path is None or not stress_path.is_file():
+                errors.append(f"locked asset has no stress-test evidence: {row['tag']}")
+            else:
+                evidence = read_json(stress_path)
+                cases = evidence.get("cases", [])
+                passed = sum(case.get("verdict") == "pass" for case in cases)
+                required = stress_requirement(row["type"])
+                if row["type"] == "character" and (len(cases) != required or passed != required):
+                    errors.append(f"locked character lost its 10/10 evidence: {row['tag']}")
+                if row["type"] != "character" and (
+                    not cases or passed != len(cases) or evidence.get("lock_decision") != "approved"
+                ):
+                    errors.append(f"locked asset lost its all-pass approved evidence: {row['tag']}")
 
     for shot_path in sorted((project / "prompts/shot-cards").glob("*.json")):
         errors.extend(f"{shot_path.name}: {error}" for error in validate_shot_card(read_json(shot_path)))
         readiness = gate_shot(project, shot_path)
         warnings.extend(f"{shot_path.name} is not generation-ready: {error}" for error in readiness.errors)
     attempts = read_jsonl(project / "docs/generation-log.jsonl")
+    latest_by_shot: dict[str, dict[str, Any]] = {}
     for row in attempts:
+        latest_by_shot[str(row.get("shot_id", ""))] = row
         if row.get("simplify_required"):
             warnings.append(f"{row['shot_id']} reached attempt {row['attempt']} and must be simplified")
+    for shot, last in latest_by_shot.items():
+        if last.get("verdict") == "rejected" and 10 <= int(last.get("attempt", 0)) < 15:
+            warnings.append(
+                f"{shot} is in the 10 to 15 stop-polishing window at attempt {last['attempt']}: "
+                "prefer a simpler shot over more wording changes"
+            )
     return GateReport(not errors, errors, warnings, [row["tag"] for row in registry.get("assets", [])])
 
 

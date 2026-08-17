@@ -5,6 +5,16 @@ import json
 import sys
 from pathlib import Path
 
+from .heygen import (
+    configure_heygen,
+    download_heygen_video,
+    execute_heygen,
+    heygen_avatar_looks,
+    heygen_doctor,
+    heygen_video_payload,
+    heygen_video_status,
+    heygen_voices,
+)
 from .io import read_json, write_json
 from .models import StudioError
 from .project import (
@@ -135,6 +145,49 @@ def build_parser() -> argparse.ArgumentParser:
     render.add_argument("--model", required=True)
     render.add_argument("--attachment-map")
     render.add_argument("--execute", action="store_true")
+
+    subparsers.add_parser("heygen-doctor", help="check HeyGen API key and account")
+
+    heygen_avatars = subparsers.add_parser("heygen-avatars", help="list HeyGen avatar looks")
+    heygen_avatars.add_argument("--group-id")
+
+    subparsers.add_parser("heygen-voices", help="list HeyGen voices")
+
+    heygen_configure = subparsers.add_parser("heygen-configure", help="set the project HeyGen presenter")
+    heygen_configure.add_argument("project")
+    heygen_configure.add_argument("--avatar-id", required=True)
+    heygen_configure.add_argument("--voice-id", required=True)
+    heygen_configure.add_argument("--avatar-name")
+    identity = heygen_configure.add_mutually_exclusive_group(required=True)
+    identity.add_argument(
+        "--platform-persona",
+        action="store_true",
+        help="the presenter is a platform-generated fictional persona",
+    )
+    identity.add_argument(
+        "--real-person",
+        action="store_true",
+        help="the presenter is modeled on a real person (requires --identity-authorized)",
+    )
+    heygen_configure.add_argument(
+        "--identity-authorized",
+        action="store_true",
+        help="the real person has explicitly authorized this presenter",
+    )
+
+    heygen_render = subparsers.add_parser("heygen-render", help="preview or execute a HeyGen submission")
+    heygen_render.add_argument("--prompt", required=True)
+    heygen_render.add_argument("--resolution", default="1080p", choices=("720p", "1080p", "4k"))
+    heygen_render.add_argument("--execute", action="store_true")
+
+    heygen_status = subparsers.add_parser("heygen-status", help="check a HeyGen video by id")
+    heygen_status.add_argument("--video-id", required=True)
+
+    heygen_download = subparsers.add_parser(
+        "heygen-download", help="download a completed HeyGen video into generations/"
+    )
+    heygen_download.add_argument("project")
+    heygen_download.add_argument("--video-id", required=True)
     return parser
 
 
@@ -228,6 +281,43 @@ def run(args: argparse.Namespace) -> int:
         if args.execute:
             return execute_higgsfield(_path(args.prompt), args.model, attachment_map)
         print(json.dumps(higgsfield_args(_path(args.prompt), args.model, attachment_map), indent=2))
+    elif command == "heygen-doctor":
+        print(json.dumps(heygen_doctor(), indent=2, sort_keys=True))
+    elif command == "heygen-avatars":
+        print(json.dumps(heygen_avatar_looks(args.group_id), indent=2, sort_keys=True))
+    elif command == "heygen-voices":
+        print(json.dumps(heygen_voices(), indent=2, sort_keys=True))
+    elif command == "heygen-configure":
+        configure_heygen(
+            _path(args.project),
+            avatar_id=args.avatar_id,
+            voice_id=args.voice_id,
+            avatar_name=args.avatar_name,
+            real_person=args.real_person,
+            identity_authorized=args.identity_authorized,
+        )
+        print(f"configured heygen presenter for {_path(args.project)}")
+    elif command == "heygen-render":
+        if args.execute:
+            print(
+                json.dumps(
+                    execute_heygen(_path(args.prompt), resolution=args.resolution),
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(
+                json.dumps(
+                    heygen_video_payload(_path(args.prompt), resolution=args.resolution),
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+    elif command == "heygen-status":
+        print(json.dumps(heygen_video_status(args.video_id), indent=2, sort_keys=True))
+    elif command == "heygen-download":
+        print(download_heygen_video(_path(args.project), args.video_id))
     return 0
 
 

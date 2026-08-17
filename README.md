@@ -43,6 +43,8 @@ budget, that a specific model is exclusive to one provider, or that a model can 
 - A read-only project audit that re-verifies visual references and locked-asset stress evidence
 - A pinned-upstream drift guard, `scripts/check_upstream_pin.py`, enforced in CI
 - A Higgsfield adapter that discovers the live catalog instead of hardcoding model names
+- A HeyGen adapter for talking shots: a configured standard presenter speaks the card's verbatim dialogue,
+  behind the same render gate
 
 Editing, cleanup, color, sound, and mastering remain human-approved stages.
 
@@ -80,8 +82,9 @@ setup
 ```
 
 See [docs/UPSTREAM.md](docs/UPSTREAM.md) for provenance and the Markdown-to-JSON boundary,
-[docs/WORKFLOW.md](docs/WORKFLOW.md) for the gates, and [docs/HIGGSFIELD.md](docs/HIGGSFIELD.md) for the provider
-boundary.
+[docs/WORKFLOW.md](docs/WORKFLOW.md) for the gates, [docs/HIGGSFIELD.md](docs/HIGGSFIELD.md) for the
+cinematography provider, and [docs/HEYGEN.md](docs/HEYGEN.md) for the talking-shot provider and its standard
+presenter convention.
 
 ## Higgsfield
 

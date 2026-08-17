@@ -65,5 +65,6 @@ a draft, submission preview, or unaccepted take as complete.
 ## Keep providers at the edge
 
 Treat model catalogs as live data. For Higgsfield, discover the current catalog and inspect the model schema before
-mapping attachments. Preview the argument array first. Submit a billable render only when the user explicitly
-authorizes generation.
+mapping attachments. Preview the argument array first. For HeyGen talking shots, use the project's configured
+standard presenter, preview the payload with `heygen-render`, and route silent shots to Higgsfield instead. Submit
+a billable render on either provider only when the user explicitly authorizes generation.

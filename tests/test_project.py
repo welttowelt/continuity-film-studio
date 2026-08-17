@@ -62,9 +62,17 @@ def add_locked_asset(project: Path, tag: str, asset_type: str, *, rights: str = 
     )
     report = stress_template(project, tag)
     report["reviewer"] = "Test Reviewer"
+    if asset_type != "character":
+        report["lock_decision"] = "approved"
+        report["lock_decision_by"] = "Test Producer"
     for index, case in enumerate(report["cases"]):
         case["condition"] = f"Production condition {index + 1} for {tag}."
-        case["passed"] = True
+        case["angle"] = f"Angle {index + 1}"
+        case["shot_size"] = f"Shot size {index + 1}"
+        case["scene_lighting"] = f"Scene lighting {index + 1}"
+        case["prompt"] = f"Complete test prompt {index + 1} for {tag}."
+        case["result"] = f"assets/tests/{asset_name}-test-{index + 1}.png"
+        case["verdict"] = "pass"
     record_stress_test(project, tag, report)
     lock_asset(project, tag)
 
@@ -80,6 +88,11 @@ def ready_project(tmp_path: Path, distribution: str = "internal") -> tuple[Path,
     card["location"] = "@room"
     card["characters"] = [{"tag": "@cal", "state": "base"}]
     card["props"] = ["@cup"]
+    card["prompt_prep"]["timed_beats"] = [
+        {"start_seconds": 2.0, "end_seconds": 2.6, "action": "Cal turns his eyes toward the cup."},
+        {"start_seconds": 7.0, "end_seconds": 7.6, "action": "Cal returns his gaze to camera."},
+    ]
+    card["prompt_prep"]["known_risk"] = "Cal's eyes or hand identity drifts during the glance"
     shot_path = project / "prompts/shot-cards/SC01-SH01.json"
     write_json(shot_path, card)
     return project, shot_path
@@ -97,6 +110,15 @@ def test_gate_blocks_draft_production(tmp_path: Path) -> None:
     assert audit.passed
     assert "visual bible is still draft" in audit.warnings
     assert any("not generation-ready" in warning for warning in audit.warnings)
+
+
+def test_init_seeds_machina_markdown_contract(tmp_path: Path) -> None:
+    project = tmp_path / "studio"
+    init_project(project, "Studio", "higgsfield", "internal")
+    for filename in ("breakdown.md", "bible.md", "registry.md", "generation-log.md"):
+        seeded = project / "docs" / filename
+        assert seeded.is_file()
+        assert seeded.read_text(encoding="utf-8").startswith("# ")
 
 
 def test_incomplete_stress_test_cannot_lock(tmp_path: Path) -> None:
@@ -120,10 +142,15 @@ def test_incomplete_stress_test_cannot_lock(tmp_path: Path) -> None:
     report["reviewer"] = "Test Reviewer"
     for index, case in enumerate(report["cases"]):
         case["condition"] = f"Distinct production condition {index + 1}."
+        case["angle"] = f"Angle {index + 1}"
+        case["shot_size"] = f"Shot size {index + 1}"
+        case["scene_lighting"] = f"Scene lighting {index + 1}"
+        case["prompt"] = f"Complete static test prompt {index + 1}."
+        case["result"] = f"assets/tests/cal-test-{index + 1}.png"
     for case in report["cases"][:-1]:
-        case["passed"] = True
+        case["verdict"] = "pass"
     record_stress_test(project, "@cal", report)
-    with pytest.raises(StudioError, match="full pass"):
+    with pytest.raises(StudioError, match="exactly 10/10"):
         lock_asset(project, "@cal")
 
 
@@ -136,6 +163,18 @@ def test_gate_and_compile_locked_production(tmp_path: Path) -> None:
     assert [block["name"] for block in prompt["blocks"]] == list(PROMPT_BLOCK_NAMES)
     assert "Stable descriptor for @cal" in prompt["render_text"]
     assert audit_project(project).passed
+
+
+def test_compile_rejects_overlapping_action_beats(tmp_path: Path) -> None:
+    project, shot_path = ready_project(tmp_path)
+    card = read_json(shot_path)
+    card["prompt_prep"]["timed_beats"] = [
+        {"start_seconds": 2.0, "end_seconds": 2.6, "action": "Cal turns toward the cup."},
+        {"start_seconds": 2.4, "end_seconds": 3.0, "action": "Cal looks back to camera."},
+    ]
+    write_json(shot_path, card)
+    with pytest.raises(StudioError, match="must not overlap"):
+        compile_prompt(project, shot_path)
 
 
 def test_commercial_asset_requires_confirmed_rights(tmp_path: Path) -> None:
@@ -157,9 +196,16 @@ def test_commercial_asset_requires_confirmed_rights(tmp_path: Path) -> None:
     )
     report = stress_template(project, "@asset")
     report["reviewer"] = "Test Reviewer"
+    report["lock_decision"] = "approved"
+    report["lock_decision_by"] = "Test Producer"
     for index, case in enumerate(report["cases"]):
         case["condition"] = f"Distinct commercial condition {index + 1}."
-        case["passed"] = True
+        case["angle"] = f"Angle {index + 1}"
+        case["shot_size"] = f"Shot size {index + 1}"
+        case["scene_lighting"] = f"Scene lighting {index + 1}"
+        case["prompt"] = f"Complete static commercial test prompt {index + 1}."
+        case["result"] = f"assets/tests/asset-test-{index + 1}.png"
+        case["verdict"] = "pass"
     record_stress_test(project, "@asset", report)
     with pytest.raises(StudioError, match="confirmed asset rights"):
         lock_asset(project, "@asset")
@@ -194,11 +240,11 @@ def test_attempt_log_enforces_one_changed_block(tmp_path: Path) -> None:
         prompt_path=prompt_2,
         result_path=result_2,
         verdict="rejected",
-        changed_block="acting_and_performance",
+        changed_block="character_acting",
         qa=None,
         allow_identical=False,
     )
-    assert second["detected_changed_blocks"] == ["acting_and_performance"]
+    assert second["detected_changed_blocks"] == ["character_acting"]
 
     card["acting"] = "Cal looks down."
     card["lens"] = "35mm"
@@ -211,7 +257,7 @@ def test_attempt_log_enforces_one_changed_block(tmp_path: Path) -> None:
             prompt_path=prompt_3,
             result_path=result_2,
             verdict="rejected",
-            changed_block="acting_and_performance",
+            changed_block="character_acting",
             qa=None,
             allow_identical=False,
         )

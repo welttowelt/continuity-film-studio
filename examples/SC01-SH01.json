@@ -14,11 +14,27 @@
   "description": "Cal notices the cup.",
   "dialogue": "",
   "dramaturgy": "recognition",
-  "duration_seconds": 6,
+  "duration_seconds": 12,
   "goal": "Reveal that Cal recognizes the object without explaining why.",
   "lens": "50mm",
   "location": "@kitchen_night",
   "pace": "restrained",
+  "prompt_prep": {
+    "known_risk": "Cal's eyes or hand identity drifts during the glance",
+    "text_tasks": [],
+    "timed_beats": [
+      {
+        "action": "Cal shifts his eyes toward the cup.",
+        "end_seconds": 2.6,
+        "start_seconds": 2.0
+      },
+      {
+        "action": "Cal returns his gaze to the other character.",
+        "end_seconds": 7.6,
+        "start_seconds": 7.0
+      }
+    ]
+  },
   "props": [
     "@red_cup"
   ],
@@ -26,7 +42,6 @@
   "shot_size": "medium close-up",
   "style_device": "single motivated push-in",
   "task_verb": "recognizes",
-  "text_tasks": [],
   "time_of_day": "night",
   "transition": "cut on Cal's returning eyeline"
 }

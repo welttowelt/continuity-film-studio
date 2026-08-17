@@ -29,21 +29,21 @@ SHOT_FIELDS = (
 )
 
 PROMPT_BLOCK_NAMES = (
-    "shot_contract",
-    "exact_cast",
-    "character_passports",
-    "location_passport",
-    "prop_passports",
-    "composition_and_blocking",
-    "timed_action_beats",
-    "acting_and_performance",
-    "dialogue_and_sound",
-    "camera_and_lens",
+    "scene_context",
+    "active_references",
+    "location_map",
+    "first_frame_blocking",
+    "format_mode",
+    "optics",
+    "camera_body",
+    "action_timing",
+    "physics",
     "lighting",
-    "physics_and_continuity",
-    "style_and_texture",
-    "palette_60_30_10",
-    "reference_roles_and_boundaries",
+    "audio",
+    "character_acting",
+    "style_prefix",
+    "quality_bar",
+    "positive_constraints",
 )
 
 VISUAL_BIBLE_DECISIONS = (
@@ -112,12 +112,16 @@ def validate_shot_card(card: dict[str, Any]) -> list[str]:
         errors.append("props must be a list")
 
     duration = card["duration_seconds"]
-    if not isinstance(duration, (int, float)) or not 0 < duration <= 30:
-        errors.append("duration_seconds must be greater than 0 and no more than 30")
+    if not isinstance(duration, (int, float)) or not 10 <= duration <= 15:
+        errors.append("duration_seconds must be between 10 and 15")
 
-    text_tasks = card.get("text_tasks", [])
+    prompt_prep = card.get("prompt_prep", {})
+    if not isinstance(prompt_prep, dict):
+        errors.append("prompt_prep must be an object when present")
+        return errors
+    text_tasks = prompt_prep.get("text_tasks", [])
     if not isinstance(text_tasks, list):
-        errors.append("text_tasks must be a list when present")
+        errors.append("prompt_prep.text_tasks must be a list when present")
 
     return errors
 
@@ -143,5 +147,5 @@ def shot_asset_tags(card: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(tags))
 
 
-def stress_requirement(asset_type: str) -> int:
-    return {"character": 10, "location": 8, "prop": 5}[asset_type]
+def stress_requirement(asset_type: str) -> int | None:
+    return {"character": 10, "location": None, "prop": None}[asset_type]

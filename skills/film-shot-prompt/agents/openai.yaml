@@ -1,4 +1,0 @@
-interface:
-  display_name: "Film Shot Prompt"
-  short_description: "Compile gated prompts and log attempts"
-  default_prompt: "Use $film-shot-prompt to compile and iterate this shot without breaking continuity."

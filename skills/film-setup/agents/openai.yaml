@@ -1,4 +1,0 @@
-interface:
-  display_name: "Film Setup"
-  short_description: "Configure models and production boundaries"
-  default_prompt: "Use $film-setup to configure this film project and its generation providers."

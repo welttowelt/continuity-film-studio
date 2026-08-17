@@ -1,0 +1,3 @@
+[submodule "upstream/machina-film-studio-skills"]
+	path = upstream/machina-film-studio-skills
+	url = https://github.com/machina-exm/film-studio-skills.git

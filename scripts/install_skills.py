@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Install continuity film skills as local symlinks")
+    parser = argparse.ArgumentParser(description="Install repo-owned enforcement skills as local symlinks")
     parser.add_argument("--target", default="~/.codex/skills")
     args = parser.parse_args()
 

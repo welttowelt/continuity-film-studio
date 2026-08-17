@@ -66,7 +66,16 @@ def init_project(project: Path, name: str, provider: str, distribution: str) -> 
                 "discover_live_catalog": True,
             }
         },
-        "stress_requirements": {"character": 10, "location": 8, "prop": 5},
+        "working_defaults": {
+            "clip_seconds": 12,
+            "frame_format": "16:9",
+            "generation_mode": "text-to-video",
+        },
+        "stress_requirements": {
+            "character": 10,
+            "location": "explicit-pass",
+            "prop": "explicit-pass",
+        },
     }
     write_json(project / "config/project.json", config)
     write_json(project / "docs/registry.json", {"assets": []})
@@ -91,8 +100,23 @@ def init_project(project: Path, name: str, provider: str, distribution: str) -> 
         },
     )
     (project / "docs/generation-log.jsonl").touch()
-    (project / "docs/visual-bible.md").write_text(
-        "# Visual bible\n\nRecord references, anti-references, and the final written decisions here.\n",
+    (project / "docs/breakdown.md").write_text(
+        "# Breakdown\n\n| scene id | summary | location | time | characters | props | shot cards | status |\n"
+        "|---|---|---|---|---|---|---|---|\n",
+        encoding="utf-8",
+    )
+    (project / "docs/bible.md").write_text(
+        "# Visual bible\n\nRecord approved reference-board decisions here.\n",
+        encoding="utf-8",
+    )
+    (project / "docs/registry.md").write_text(
+        "# Asset registry\n\n| tag | type | version | status | passport | scenes |\n"
+        "|---|---|---|---|---|---|\n",
+        encoding="utf-8",
+    )
+    (project / "docs/generation-log.md").write_text(
+        "# Generation log\n\n| shot id | prompt version | what changed | result | verdict |\n"
+        "|---|---|---|---|---|\n",
         encoding="utf-8",
     )
     (project / "README.md").write_text(
@@ -120,7 +144,7 @@ def shot_template(shot_id: str) -> dict[str, Any]:
         "props": [],
         "description": "One visible action.",
         "dialogue": "",
-        "duration_seconds": 6,
+        "duration_seconds": 12,
         "complexity": "medium",
         "goal": "What changes for the viewer in this shot.",
         "task_verb": "reveals",
@@ -135,7 +159,22 @@ def shot_template(shot_id: str) -> dict[str, Any]:
         "cut_type": "hard cut",
         "pace": "restrained",
         "transition": "cut",
-        "text_tasks": [],
+        "prompt_prep": {
+            "text_tasks": [],
+            "timed_beats": [
+                {
+                    "start_seconds": 2.0,
+                    "end_seconds": 2.6,
+                    "action": "Replace with the first visible action beat.",
+                },
+                {
+                    "start_seconds": 7.0,
+                    "end_seconds": 7.6,
+                    "action": "Replace with the resolving action beat.",
+                },
+            ],
+            "known_risk": "Replace with the shot's concrete failure risk.",
+        },
     }
 
 
@@ -313,17 +352,26 @@ def stress_template(project: Path, tag: str) -> dict[str, Any]:
     project = ensure_project(project)
     row = registry_row(project, tag)
     required = stress_requirement(row["type"])
+    case_count = required or 1
     return {
         "asset_tag": tag,
         "required_passes": required,
         "reviewer": "",
+        "lock_decision": "pending",
+        "lock_decision_by": "",
         "cases": [
             {
                 "id": f"case-{index + 1:02d}",
                 "condition": "Describe the production condition.",
-                "passed": False,
+                "angle": "Describe the test angle.",
+                "shot_size": "Describe the test shot size.",
+                "scene_lighting": "Describe the actual scene lighting.",
+                "paired_asset": "",
+                "prompt": "Paste the complete static-image test prompt.",
+                "result": "Record the versioned result path.",
+                "verdict": "pending",
             }
-            for index in range(required)
+            for index in range(case_count)
         ],
         "notes": "",
     }
@@ -365,9 +413,15 @@ def lock_asset(project: Path, tag: str) -> None:
     report = read_json(project / row["stress_test_file"])
     cases = report.get("cases", [])
     required = stress_requirement(row["type"])
-    passed = sum(bool(case.get("passed")) for case in cases)
-    if len(cases) < required or passed != len(cases):
-        raise StudioError(f"asset requires a full pass of at least {required} cases: {passed}/{len(cases)}")
+    passed = sum(case.get("verdict") == "pass" for case in cases)
+    if row["type"] == "character" and (len(cases) != required or passed != required):
+        raise StudioError(f"character requires exactly 10/10 passing attempts: {passed}/{len(cases)}")
+    if row["type"] != "character" and (not cases or passed != len(cases)):
+        raise StudioError(f"asset test matrix must contain only passing cases: {passed}/{len(cases)}")
+    if row["type"] != "character" and report.get("lock_decision") != "approved":
+        raise StudioError("location and prop locks require an explicit approved decision")
+    if row["type"] != "character" and not str(report.get("lock_decision_by", "")).strip():
+        raise StudioError("location and prop locks require the decision-maker's name")
     if not str(report.get("reviewer", "")).strip():
         raise StudioError("stress test requires a named reviewer")
     identifiers = [str(case.get("id", "")).strip() for case in cases]
@@ -380,6 +434,19 @@ def lock_asset(project: Path, tag: str) -> None:
         or any(condition == "Describe the production condition." for condition in conditions)
     ):
         raise StudioError("stress-test conditions must be unique production conditions, not placeholders")
+    required_case_fields = ("angle", "shot_size", "scene_lighting", "prompt", "result")
+    placeholders = (
+        "Describe the test angle.",
+        "Describe the test shot size.",
+        "Describe the actual scene lighting.",
+        "Paste the complete static-image test prompt.",
+        "Record the versioned result path.",
+    )
+    for case in cases:
+        if any(not str(case.get(field, "")).strip() for field in required_case_fields):
+            raise StudioError("every stress-test row requires angle, shot size, lighting, prompt, and result")
+        if any(str(case.get(field, "")).strip() in placeholders for field in required_case_fields):
+            raise StudioError("stress-test rows must replace every matrix placeholder")
 
     rights = passport.get("rights", {})
     if rights.get("state") == "denied":
@@ -419,10 +486,10 @@ def gate_shot(project: Path, shot_path: Path) -> GateReport:
         if row.get("status") != "locked":
             errors.append(f"asset is not locked: {tag}")
 
-    if not card.get("text_tasks"):
+    if not card.get("prompt_prep", {}).get("text_tasks"):
         warnings.append("no edit-stage text tasks recorded; confirm that no required text appears in-frame")
-    if card.get("duration_seconds", 0) > 15 and card.get("complexity") == "high":
-        warnings.append("long, high-complexity shot; consider splitting before attempt 15")
+    if card.get("complexity") == "high":
+        warnings.append("high-complexity shot; confirm it still contains one action before generation")
     return GateReport(not errors, errors, warnings, checked_assets)
 
 
@@ -457,6 +524,7 @@ def compile_prompt(project: Path, shot_path: Path) -> Path:
         raise StudioError("shot gate failed: " + "; ".join(report.errors))
     card = read_json(shot_path)
     bible = read_json(project / "docs/visual-bible.json")
+    config = read_json(project / "config/project.json")
     location_tag = card["location"] if isinstance(card["location"], str) else card["location"]["tag"]
     location = _passport(project, location_tag)
     reference_lines = []
@@ -470,8 +538,8 @@ def compile_prompt(project: Path, shot_path: Path) -> Path:
         }[passport["type"]]
         for reference in passport["reference_files"]:
             reference_lines.append(
-                f"{reference} controls {controls}; it must not override motion, dialogue, "
-                "or unrelated assets."
+                f"{reference} fixes {controls}. Motion, dialogue, and every other asset follow their own "
+                "locked shot instructions."
             )
             attachments.append(
                 {
@@ -483,57 +551,136 @@ def compile_prompt(project: Path, shot_path: Path) -> Path:
             )
 
     cast_count = len(card["characters"])
+    character_descriptors = _character_descriptors(project, card)
+    prop_descriptors = _prop_descriptors(project, card)
+    reference_summary = "\n".join(reference_lines)
+    active_references = (
+        f"Characters:\n{character_descriptors}\n\n"
+        f"Location:\n{location_tag}: {location['descriptor']}\n\n"
+        f"Props:\n{prop_descriptors}\n\n"
+        f"Reference files:\n{reference_summary}"
+    )
+    prompt_prep = card.get("prompt_prep", {})
+    timed_beats = prompt_prep.get("timed_beats", [])
+    if not timed_beats:
+        raise StudioError("shot requires timed_beats before prompt compilation")
+    beat_lines: list[str] = []
+    previous_end = 0.0
+    for beat in timed_beats:
+        start = beat.get("start_seconds")
+        end = beat.get("end_seconds")
+        action = str(beat.get("action", "")).strip()
+        if not isinstance(start, (int, float)) or not isinstance(end, (int, float)) or not action:
+            raise StudioError("each timed beat requires numeric start/end seconds and an action")
+        if start < 0 or end > card["duration_seconds"]:
+            raise StudioError("each timed beat must stay inside the shot duration")
+        if start < previous_end:
+            raise StudioError("timed beats must be ordered and must not overlap")
+        if not 0.3 <= end - start <= 0.8:
+            raise StudioError("each action beat must last 0.3 to 0.8 seconds")
+        if action.startswith("Replace with"):
+            raise StudioError("replace every placeholder timed beat before prompt compilation")
+        beat_lines.append(f"{start:.1f}-{end:.1f}s: {action}")
+        previous_end = end
+    known_risk = str(prompt_prep.get("known_risk", "")).strip()
+    if not known_risk or known_risk.startswith("Replace with"):
+        raise StudioError("shot requires a concrete known_risk before prompt compilation")
+    defaults = config.get("working_defaults", {})
+    dialogue_quoted = json.dumps(card["dialogue"], ensure_ascii=False)
     blocks = [
         {
-            "name": "shot_contract",
+            "name": "scene_context",
             "text": (
-                f"{card['duration_seconds']} seconds. One action only: "
-                f"{card['task_verb']}. {card['description']}"
+                f"EXACT {cast_count} CHARACTERS — NO DUPLICATES. Shot {card['shot_id']}. "
+                f"Goal: {card['goal']}. One action: {card['task_verb']} — {card['description']}"
             ),
         },
-        {"name": "exact_cast", "text": f"EXACT {cast_count} CHARACTERS. Each listed character appears once."},
-        {"name": "character_passports", "text": _character_descriptors(project, card)},
+        {"name": "active_references", "text": active_references},
         {
-            "name": "location_passport",
-            "text": f"{location_tag}: {location['descriptor']} Time: {card['time_of_day']}.",
-        },
-        {"name": "prop_passports", "text": _prop_descriptors(project, card)},
-        {
-            "name": "composition_and_blocking",
-            "text": f"{card['shot_size']}; {card['angle']}. {card['blocking']}",
-        },
-        {"name": "timed_action_beats", "text": card.get("timed_beats", card["description"])},
-        {"name": "acting_and_performance", "text": card["acting"]},
-        {
-            "name": "dialogue_and_sound",
+            "name": "location_map",
             "text": (
-                f"Dialogue verbatim: {card['dialogue']!r}. Sound direction: {bible['decisions']['sound']}"
+                f"{card['blocking']} State all positions and distances in metres. "
+                "The camera stays on the established side of the action axis for the full shot."
             ),
         },
         {
-            "name": "camera_and_lens",
+            "name": "first_frame_blocking",
             "text": (
-                f"One {card['lens']} lens. {card['camera_movement']}. "
-                f"{card['cut_type']}; {card['pace']}; {card['transition']}."
-            ),
-        },
-        {"name": "lighting", "text": bible["decisions"]["lighting"]},
-        {
-            "name": "physics_and_continuity",
-            "text": (
-                "Preserve damage, debris, wardrobe state, prop position, and screen direction "
-                "for the full shot."
+                f"First frame: {card['blocking']} Every character and prop begins already in place; "
+                "the camera begins at its specified starting point."
             ),
         },
         {
-            "name": "style_and_texture",
+            "name": "format_mode",
+            "text": (
+                f"Frame format: {defaults.get('frame_format', 'unspecified')}. "
+                f"Generation mode: {defaults.get('generation_mode', 'unspecified')}. "
+                f"Duration: {card['duration_seconds']} seconds."
+            ),
+        },
+        {
+            "name": "optics",
+            "text": (
+                f"Use one {card['lens']} lens for the full shot. "
+                "Field of view remains constant within the shot; "
+                f"the next change occurs only on the specified {card['cut_type']}."
+            ),
+        },
+        {
+            "name": "camera_body",
+            "text": (
+                f"Camera height and angle: {card['angle']}. Framing: {card['shot_size']}. "
+                f"Support, movement, path, and stopping point: {card['camera_movement']}. "
+                f"Pace: {card['pace']}; transition: {card['transition']}."
+            ),
+        },
+        {"name": "action_timing", "text": "\n".join(beat_lines)},
+        {
+            "name": "physics",
+            "text": (
+                "Physical consequences persist. Damage remains visible; "
+                "debris and props stay where they land."
+            ),
+        },
+        {
+            "name": "lighting",
+            "text": (
+                f"{location['descriptor']} Locked light direction: {bible['decisions']['lighting']} "
+                f"Locked palette: {bible['decisions']['palette']}"
+            ),
+        },
+        {
+            "name": "audio",
+            "text": (
+                f"Ambience and in-frame sound: {bible['decisions']['sound']} "
+                f"Dialogue verbatim: {dialogue_quoted}."
+            ),
+        },
+        {"name": "character_acting", "text": card["acting"]},
+        {
+            "name": "style_prefix",
             "text": (
                 f"{bible['decisions']['style']} {bible['decisions']['texture']} "
-                f"Style device: {card['style_device']}."
+                f"Style device: {card['style_device']}. 60:30:10 palette: {bible['decisions']['palette']}"
             ),
         },
-        {"name": "palette_60_30_10", "text": bible["decisions"]["palette"]},
-        {"name": "reference_roles_and_boundaries", "text": "\n".join(reference_lines)},
+        {
+            "name": "quality_bar",
+            "text": (
+                "Exact reference match, coherent anatomy, stable materials, natural motion, "
+                "persistent continuity, "
+                "accurate lip-sync where dialogue is present, and artifact-free surfaces and objects."
+            ),
+        },
+        {
+            "name": "positive_constraints",
+            "text": (
+                "Every listed character appears once with stable identity, living eyes, "
+                "natural hands and teeth, legible material detail, and continuous motion. "
+                "The take fails review if this known risk appears: "
+                f"{known_risk}."
+            ),
+        },
     ]
     if tuple(block["name"] for block in blocks) != PROMPT_BLOCK_NAMES:
         raise StudioError("compiled prompt block order drifted from the schema")

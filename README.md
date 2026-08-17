@@ -1,18 +1,24 @@
 # Continuity Film Studio
 
-A provider-aware production system for continuity-heavy AI video. It turns the useful part of the “$2M video
-pipeline” article into enforceable project state: shot cards, written visual decisions, asset passports, stress
-tests, generation gates, fixed prompt blocks, immutable attempt logs, and checklist-controlled selects.
+A provider-aware enforcement layer for [Machina's seven film-studio
+skills](https://github.com/machina-exm/film-studio-skills). The upstream skills run the creative workflow; this
+repository turns their approved decisions into enforceable project state: shot cards, visual locks, asset
+passports, stress tests, generation gates, fixed prompt blocks, immutable attempt logs, and checklist-controlled
+selects.
 
 This repository is deliberately separate from `natural-faceswap-workflow`. Face swapping modifies existing
 footage. This lane plans and generates original shots while keeping characters, locations, props, camera rules,
 and state changes consistent across a production.
 
-## The useful idea
+## Architecture
 
-The article's strongest claim is architectural: a video model does not remember yesterday's actor, location, or
-prop. The production files must hold that memory. The named model and platform can change without changing the
-system.
+The video model does not remember a prior actor, location, or prop. The production files hold that continuity.
+The named model and platform can change without changing the system.
+
+The repository pins Machina's unmodified upstream skills as a Git submodule. It adds one local skill,
+`continuity-film-enforcer`, plus a tested CLI. The overlay does not pretend to be an eighth creative stage and
+does not silently convert upstream Markdown: it mirrors approved state into JSON, validates it, and preserves an
+audit trail.
 
 The marketing claims are not treated as evidence. This project does **not** claim that a workflow has a $2M
 budget, that a specific model is exclusive to one provider, or that a model can reliably one-shot a finished
@@ -20,14 +26,17 @@ budget, that a specific model is exclusive to one provider, or that a model can 
 
 ## What is implemented
 
-- Seven agent skills covering setup through generation
+- Machina's exact seven upstream skills, pinned rather than reconstructed
+- One local enforcement skill that maps their outputs into deterministic gates
 - A 22-field shot-card schema
 - Written visual-bible approval
 - Versioned character, location, prop, and state-variant passports
 - Rights and real-person authorization gates
-- 10/10 character, 8/8 location, and 5/5 prop stress-test locks
+- Exactly 10/10 character stress tests
+- Completed all-pass matrices and an explicit decision for location and prop locks
 - A hard scene gate: no compiled generation prompt until every referenced asset is locked
-- A fixed 15-block positive prompt compiler
+- Machina's exact 15-block positive prompt order
+- 10–15 second shots and 0.3–0.8 second action beats
 - One-block-change enforcement between attempts
 - Automatic “simplify the shot” flag on rejected attempt 15
 - Checklist-controlled promotion from `generations/` to `selects/`
@@ -38,6 +47,13 @@ Editing, cleanup, color, sound, and mastering remain human-approved stages.
 
 ## Quick start
 
+Clone with the pinned upstream source:
+
+```bash
+git clone --recurse-submodules <repository-url>
+cd continuity-film-studio
+```
+
 ```bash
 uv sync --extra dev
 uv run continuity-film init productions/demo --name "Demo" --provider higgsfield
@@ -45,34 +61,36 @@ uv run continuity-film shot-template productions/demo --shot-id SC01-SH01
 uv run continuity-film audit productions/demo
 ```
 
-The first audit is expected to show draft state. Complete the production in this order:
-
-```text
-film-setup
-  -> film-studio-init
-  -> film-breakdown
-  -> film-reference-board
-  -> film-asset-passport
-  -> film-stress-test
-  -> film-shot-prompt
-```
-
-Install the seven local skills into Codex without copying or forking them:
+Install Machina's seven skills and the local enforcement overlay:
 
 ```bash
+npx skills add ./upstream/machina-film-studio-skills
 uv run python scripts/install_skills.py
 ```
 
-The installer refuses to replace an existing skill with the same name.
+Select all seven upstream skills for Codex in the installer. The local installer only adds
+`continuity-film-enforcer` and refuses to replace any existing skill.
 
-See [docs/WORKFLOW.md](docs/WORKFLOW.md) for the gates and [docs/HIGGSFIELD.md](docs/HIGGSFIELD.md) for the
-provider boundary.
+The first audit is expected to show draft state. Run the upstream workflow in this order:
+
+```text
+setup
+  -> studio-init
+  -> film-breakdown
+  -> reference-board
+  -> asset-passport
+  -> stress-test
+  -> shot-prompt
+```
+
+See [docs/UPSTREAM.md](docs/UPSTREAM.md) for provenance and the Markdown-to-JSON boundary,
+[docs/WORKFLOW.md](docs/WORKFLOW.md) for the gates, and [docs/HIGGSFIELD.md](docs/HIGGSFIELD.md) for the provider
+boundary.
 
 ## Higgsfield
 
-The official CLI and public skill repository exist, but their current surface differs from the supplied article.
-The official repository currently publishes generation, identity, product-photo, and marketplace-card skills;
-the seven continuity skills in this repository are our own production layer.
+Machina's skills are provider-neutral and explicitly ask which stack the project uses. Higgsfield is an optional
+render adapter at the edge; it is not the source of continuity truth.
 
 Install and authenticate the official CLI only when you are ready to generate:
 

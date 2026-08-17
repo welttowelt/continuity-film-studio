@@ -3,15 +3,17 @@
 Higgsfield is one generation provider, not the source of production truth. The project registry and passports
 remain portable if the video model changes.
 
-## Verified public surface
+## Related public projects
 
 - Official CLI: <https://github.com/higgsfield-ai/cli>
 - Official skills: <https://github.com/higgsfield-ai/skills>
+- Machina film-studio skills: <https://github.com/machina-exm/film-studio-skills>
 - npm package: <https://www.npmjs.com/package/@higgsfield/cli>
 
-The supplied article describes seven pre-production skills. The current official skills repository exposes a
-different set aimed at generation, identity, product photography, and marketplace cards. This repository
-therefore implements the continuity layer independently and calls the official CLI only at the render boundary.
+The seven pre-production skills come from Machina, not Higgsfield's official skills repository. They are
+provider-neutral: `setup` asks which image and video stack the user operates and does not recommend a model. This
+repository pins Machina's upstream and adds deterministic continuity checks. It calls the official Higgsfield CLI
+only when Higgsfield is the selected render provider.
 
 ## Setup
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Continuity Film Enforcer"
+  short_description: "Enforce Machina film gates with auditable state"
+  default_prompt: "Use $continuity-film-enforcer to validate and compile this Machina film project."

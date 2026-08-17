@@ -1,4 +1,0 @@
-interface:
-  display_name: "Film Reference Board"
-  short_description: "Caption, reject, and lock visual references"
-  default_prompt: "Use $film-reference-board to turn these references into a written visual decision."

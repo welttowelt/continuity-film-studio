@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
@@ -25,4 +27,9 @@ jobs:
         run: |
           for skill in skills/*; do
             python scripts/quick_validate_skill.py "$skill"
+          done
+      - name: Validate pinned Machina skills
+        run: |
+          for skill in upstream/machina-film-studio-skills/skills/*; do
+            python scripts/quick_validate_skill.py --source-only "$skill"
           done

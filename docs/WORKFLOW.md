@@ -18,10 +18,10 @@
 
 ## Gate A: visual lock
 
-`bible-approve` requires approved source boards and written decisions for style, palette, lighting, optics,
-camera movement, texture, edit tempo, and sound. Reference-board approval requires at least one positive
+`bible-approve` requires approved source boards and written decisions for palette, lighting, optics, camera
+movement, texture, edit tempo, and sound. Reference-board approval requires at least one positive
 reference, a caption on every positive and negative reference, a written decision, and files that still exist
-inside the production.
+inside the production. The scene gate rechecks those board decisions, captions, and files after approval.
 
 ## Gate B: scene-open
 
@@ -33,6 +33,7 @@ inside the production.
 - every character, location, and prop is registered and locked
 - characters have exactly 10/10 passing stress-test attempts
 - every location and prop matrix row passes and the lock decision is explicitly approved
+- every recorded stress-test result exists beside its passport and includes review evidence
 - denied rights and unauthorized real-person identities are absent
 - commercial productions use only rights-confirmed assets
 
@@ -66,10 +67,14 @@ lanes.
 
 The immutable JSONL log stores the prompt hash, all 15 block hashes, and the changed line. The gate recomputes
 every hash from the block text, so a hand-edited prompt file fails before it is logged. After the first attempt,
-an entry is rejected when more than one block changed or when more than one line of the compiled prompt text
-changed. An identical prompt needs an explicit seed-only override. Rejected attempts 10 to 15 are the
-stop-polishing window and the audit warns about them. A rejected attempt 15 is marked `simplify_required` and
-attempt 16 is blocked. Split the shot, remove an action, or change the angle under a new shot ID.
+exactly one existing line must be replaced and every other line must remain verbatim. Identical retries,
+insertions, deletions, and multi-line edits are rejected. Rejected attempts 10 to 15 are the stop-polishing
+window and the audit warns about them. A rejected attempt 15 is marked `simplify_required` and attempt 16 is
+blocked. Split the shot, remove an action, or change the angle under a new shot ID.
+
+Before provider submission, the adapter rechecks the compiled prompt, the live shot gate, and hashes of the
+shot card, project configuration, visual bible, passports, references, stress records, and stress-result files.
+Any drift requires a fresh compiled prompt.
 
 ## Acceptance contract
 

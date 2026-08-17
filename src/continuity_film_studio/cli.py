@@ -118,7 +118,6 @@ def build_parser() -> argparse.ArgumentParser:
     attempt.add_argument("--verdict", choices=("accepted", "rejected"), required=True)
     attempt.add_argument("--changed-block", default="initial")
     attempt.add_argument("--qa-file")
-    attempt.add_argument("--allow-identical", action="store_true")
 
     accept = subparsers.add_parser("accept", help="copy a checklist-approved attempt into selects")
     accept.add_argument("project")
@@ -211,7 +210,7 @@ def run(args: argparse.Namespace) -> int:
             verdict=args.verdict,
             changed_block=args.changed_block,
             qa=qa,
-            allow_identical=args.allow_identical,
+            allow_identical=False,
         )
         print(json.dumps(row, indent=2, sort_keys=True))
     elif command == "accept":

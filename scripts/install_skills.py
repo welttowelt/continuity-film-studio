@@ -27,7 +27,7 @@ def main() -> int:
         if target.exists() or target.is_symlink():
             raise SystemExit(
                 f"refusing to replace existing skill: {target}\n"
-                f"remove it first if the replacement is deliberate: rm -r {target}"
+                "relocate or remove that exact path deliberately before retrying"
             )
         target.symlink_to(source, target_is_directory=True)
         print(f"installed: {source.name}")

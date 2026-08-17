@@ -27,6 +27,7 @@ from continuity_film_studio.project import (
     reference_board_template,
     shot_template,
     stress_template,
+    validate_render_prompt,
 )
 
 
@@ -44,7 +45,14 @@ def approve_bible(project: Path) -> None:
     approve_visual_bible(project)
 
 
-def add_locked_asset(project: Path, tag: str, asset_type: str, *, rights: str = "confirmed") -> None:
+def add_locked_asset(
+    project: Path,
+    tag: str,
+    asset_type: str,
+    *,
+    rights: str = "confirmed",
+    variant_of: str | None = None,
+) -> None:
     asset_name = tag.removeprefix("@").replace("/", "-")
     reference = project / "references" / f"{asset_name}.ref"
     reference.write_text("test-only reference marker", encoding="utf-8")
@@ -55,7 +63,7 @@ def add_locked_asset(project: Path, tag: str, asset_type: str, *, rights: str = 
         descriptor=f"Stable descriptor for {tag}.",
         references=[reference],
         scenes=["SC01"],
-        variant_of=None,
+        variant_of=variant_of,
         rights_state=rights,
         real_person=False,
         identity_authorized=False,
@@ -65,13 +73,16 @@ def add_locked_asset(project: Path, tag: str, asset_type: str, *, rights: str = 
     if asset_type != "character":
         report["lock_decision"] = "approved"
         report["lock_decision_by"] = "Test Producer"
+    passport_folder = project / "assets" / f"{asset_type}s" / asset_name
     for index, case in enumerate(report["cases"]):
         case["condition"] = f"Production condition {index + 1} for {tag}."
         case["angle"] = f"Angle {index + 1}"
         case["shot_size"] = f"Shot size {index + 1}"
         case["scene_lighting"] = f"Scene lighting {index + 1}"
         case["prompt"] = f"Complete test prompt {index + 1} for {tag}."
-        case["result"] = f"assets/tests/{asset_name}-test-{index + 1}.png"
+        result = passport_folder / f"{asset_name}-test-{index + 1}.png"
+        result.write_bytes(f"test result {index + 1}".encode())
+        case["result"] = str(result.relative_to(project))
         case["verdict"] = "pass"
     record_stress_test(project, tag, report)
     lock_asset(project, tag)
@@ -115,10 +126,30 @@ def test_gate_blocks_draft_production(tmp_path: Path) -> None:
 def test_init_seeds_machina_markdown_contract(tmp_path: Path) -> None:
     project = tmp_path / "studio"
     init_project(project, "Studio", "higgsfield", "internal")
-    for filename in ("breakdown.md", "bible.md", "registry.md", "generation-log.md"):
-        seeded = project / "docs" / filename
-        assert seeded.is_file()
-        assert seeded.read_text(encoding="utf-8").startswith("# ")
+    assert (project / "docs/breakdown.md").read_text(encoding="utf-8") == (
+        "# Breakdown\n\n"
+        "## Scenes\n\n"
+        "| Scene ID | Summary | Location | Time of day | Characters | Props | Shot-card file | Status |\n"
+        "|---|---|---|---|---|---|---|---|\n"
+    )
+    assert (project / "docs/bible.md").read_text(encoding="utf-8") == (
+        "# Visual Bible\n\n## Asset boards\n\n## Style boards\n\n## Ban list\n"
+    )
+    assert (project / "docs/registry.md").read_text(encoding="utf-8") == (
+        "# Asset Registry\n\n"
+        "| Tag | Type | Version | Seed file | Scenes | Status |\n"
+        "|---|---|---|---|---|---|\n"
+    )
+    assert (project / "docs/generation-log.md").read_text(encoding="utf-8") == (
+        "# Generation Log\n\n"
+        "| Shot ID | Prompt version | What changed | Result | Verdict |\n"
+        "|---|---|---|---|---|\n"
+    )
+    studio_readme = (project / "docs/README").read_text(encoding="utf-8")
+    assert "Studio" in studio_readme
+    assert "Only `/selects/` is visible to the edit." in studio_readme
+    assert "Nobody but the prompt engineer enters `/generations/`." in studio_readme
+    assert "Reference files are never renamed; a new version is a new file." in studio_readme
 
 
 def test_incomplete_stress_test_cannot_lock(tmp_path: Path) -> None:
@@ -154,6 +185,39 @@ def test_incomplete_stress_test_cannot_lock(tmp_path: Path) -> None:
         lock_asset(project, "@cal")
 
 
+def test_stress_result_paths_must_exist_beside_the_passport(tmp_path: Path) -> None:
+    project = tmp_path / "production"
+    init_project(project, "Test", "higgsfield", "internal")
+    reference = project / "references/cal.ref"
+    reference.write_text("reference", encoding="utf-8")
+    add_asset(
+        project,
+        tag="@cal",
+        asset_type="character",
+        descriptor="Stable Cal descriptor.",
+        references=[reference],
+        scenes=["SC01"],
+        variant_of=None,
+        rights_state="confirmed",
+        real_person=False,
+        identity_authorized=False,
+    )
+    report = stress_template(project, "@cal")
+    report["reviewer"] = "Test Reviewer"
+    for index, case in enumerate(report["cases"]):
+        case["condition"] = f"Distinct production condition {index + 1}."
+        case["angle"] = f"Angle {index + 1}"
+        case["shot_size"] = f"Shot size {index + 1}"
+        case["scene_lighting"] = f"Scene lighting {index + 1}"
+        case["prompt"] = f"Complete static test prompt {index + 1}."
+        case["result"] = f"assets/characters/cal/cal-test-{index + 1}.png"
+        case["verdict"] = "pass"
+    record_stress_test(project, "@cal", report)
+
+    with pytest.raises(StudioError, match="stress-test result file is missing"):
+        lock_asset(project, "@cal")
+
+
 def test_gate_and_compile_locked_production(tmp_path: Path) -> None:
     project, shot_path = ready_project(tmp_path)
     report = gate_shot(project, shot_path)
@@ -163,6 +227,111 @@ def test_gate_and_compile_locked_production(tmp_path: Path) -> None:
     assert [block["name"] for block in prompt["blocks"]] == list(PROMPT_BLOCK_NAMES)
     assert "Stable descriptor for @cal" in prompt["render_text"]
     assert audit_project(project).passed
+
+
+def test_gate_rechecks_approved_visual_bible_references(tmp_path: Path) -> None:
+    project, shot_path = ready_project(tmp_path)
+    (project / "references/lighting.ref").unlink()
+
+    report = gate_shot(project, shot_path)
+
+    assert not report.passed
+    assert any("visual-bible reference is missing" in error for error in report.errors)
+
+
+def test_compile_uses_next_highest_version_without_overwriting(tmp_path: Path) -> None:
+    project, shot_path = ready_project(tmp_path)
+    first = compile_prompt(project, shot_path)
+    assert first.name.endswith("v001.json")
+    reserved = project / "prompts/compiled/SC01-SH01-v003.json"
+    reserved.write_text('{"reserved": true}\n', encoding="utf-8")
+
+    compiled = compile_prompt(project, shot_path)
+
+    assert compiled.name.endswith("v004.json")
+    assert reserved.read_text(encoding="utf-8") == '{"reserved": true}\n'
+
+
+def test_render_validation_rejects_source_drift_after_compile(tmp_path: Path) -> None:
+    project, shot_path = ready_project(tmp_path)
+    prompt_path = compile_prompt(project, shot_path)
+    validated_project, prompt = validate_render_prompt(prompt_path)
+    assert validated_project == project.resolve()
+    assert prompt["shot_id"] == "SC01-SH01"
+
+    card = read_json(shot_path)
+    card["acting"] = "Cal gives the camera a restrained look."
+    write_json(shot_path, card)
+
+    with pytest.raises(StudioError, match="source state changed"):
+        validate_render_prompt(prompt_path)
+
+
+def test_render_validation_hashes_visual_bible_reference_content(tmp_path: Path) -> None:
+    project, shot_path = ready_project(tmp_path)
+    prompt_path = compile_prompt(project, shot_path)
+    (project / "references/lighting.ref").write_text("changed reference", encoding="utf-8")
+
+    with pytest.raises(StudioError, match="source state changed"):
+        validate_render_prompt(prompt_path)
+
+
+def test_attempt_log_rejects_source_drift_after_compile(tmp_path: Path) -> None:
+    project, shot_path = ready_project(tmp_path)
+    prompt_path = compile_prompt(project, shot_path)
+    card = read_json(shot_path)
+    card["acting"] = "Cal gives the camera a restrained look."
+    write_json(shot_path, card)
+    result = project / "generations/stale-prompt.bin"
+    result.write_bytes(b"stale")
+
+    with pytest.raises(StudioError, match="source state changed"):
+        log_attempt(
+            project,
+            shot_id="SC01-SH01",
+            prompt_path=prompt_path,
+            result_path=result,
+            verdict="rejected",
+            changed_block="initial",
+            qa=None,
+            allow_identical=False,
+        )
+
+
+def test_gate_rejects_state_variant_that_reuses_base_passport(tmp_path: Path) -> None:
+    project, shot_path = ready_project(tmp_path)
+    card = read_json(shot_path)
+    card["characters"] = [{"tag": "@cal", "state": "wet"}]
+    write_json(shot_path, card)
+
+    report = gate_shot(project, shot_path)
+
+    assert not report.passed
+    assert "state wet requires its own registered variant tag" in report.errors
+
+
+def test_gate_accepts_locked_state_variant_with_its_own_tag(tmp_path: Path) -> None:
+    project, shot_path = ready_project(tmp_path)
+    add_locked_asset(project, "@cal_wet", "character", variant_of="@cal")
+    card = read_json(shot_path)
+    card["characters"] = [{"tag": "@cal_wet", "state": "wet"}]
+    write_json(shot_path, card)
+
+    report = gate_shot(project, shot_path)
+
+    assert report.passed
+
+
+def test_gate_rejects_prop_state_that_reuses_base_passport(tmp_path: Path) -> None:
+    project, shot_path = ready_project(tmp_path)
+    card = read_json(shot_path)
+    card["props"] = [{"tag": "@cup", "state": "broken"}]
+    write_json(shot_path, card)
+
+    report = gate_shot(project, shot_path)
+
+    assert not report.passed
+    assert "state broken requires its own registered variant tag" in report.errors
 
 
 def test_compile_rejects_overlapping_action_beats(tmp_path: Path) -> None:
@@ -204,7 +373,9 @@ def test_commercial_asset_requires_confirmed_rights(tmp_path: Path) -> None:
         case["shot_size"] = f"Shot size {index + 1}"
         case["scene_lighting"] = f"Scene lighting {index + 1}"
         case["prompt"] = f"Complete static commercial test prompt {index + 1}."
-        case["result"] = f"assets/tests/asset-test-{index + 1}.png"
+        result = project / "assets/props/asset" / f"asset-test-{index + 1}.png"
+        result.write_bytes(f"commercial result {index + 1}".encode())
+        case["result"] = str(result.relative_to(project))
         case["verdict"] = "pass"
     record_stress_test(project, "@asset", report)
     with pytest.raises(StudioError, match="confirmed asset rights"):
@@ -305,12 +476,80 @@ def test_attempt_log_enforces_one_changed_line(tmp_path: Path) -> None:
     card["acting"] = "Cal blinks once.\nCal tightens his jaw.\nCal exhales."
     write_json(shot_path, card)
     prompt_2 = compile_prompt(project, shot_path)
-    with pytest.raises(StudioError, match="more than one prompt line changed"):
+    with pytest.raises(StudioError, match="exactly one prompt line"):
         log_attempt(
             project,
             shot_id="SC01-SH01",
             prompt_path=prompt_2,
             result_path=result,
+            verdict="rejected",
+            changed_block="character_acting",
+            qa=None,
+            allow_identical=False,
+        )
+
+
+def test_attempt_log_rejects_identical_seed_only_retry(tmp_path: Path) -> None:
+    project, shot_path = ready_project(tmp_path)
+    prompt = compile_prompt(project, shot_path)
+    result_1 = project / "generations/attempt-1.bin"
+    result_1.write_bytes(b"attempt one")
+    log_attempt(
+        project,
+        shot_id="SC01-SH01",
+        prompt_path=prompt,
+        result_path=result_1,
+        verdict="rejected",
+        changed_block="initial",
+        qa=None,
+        allow_identical=False,
+    )
+    result_2 = project / "generations/attempt-2.bin"
+    result_2.write_bytes(b"attempt two")
+
+    with pytest.raises(StudioError, match="exactly one prompt line"):
+        log_attempt(
+            project,
+            shot_id="SC01-SH01",
+            prompt_path=prompt,
+            result_path=result_2,
+            verdict="rejected",
+            changed_block="character_acting",
+            qa=None,
+            allow_identical=True,
+        )
+
+
+def test_attempt_log_rejects_delete_plus_insert_at_different_lines(tmp_path: Path) -> None:
+    project, shot_path = ready_project(tmp_path)
+    card = read_json(shot_path)
+    card["acting"] = "Cal breathes.\nCal looks at the cup."
+    write_json(shot_path, card)
+    prompt_1 = compile_prompt(project, shot_path)
+    result_1 = project / "generations/attempt-1.bin"
+    result_1.write_bytes(b"attempt one")
+    log_attempt(
+        project,
+        shot_id="SC01-SH01",
+        prompt_path=prompt_1,
+        result_path=result_1,
+        verdict="rejected",
+        changed_block="initial",
+        qa=None,
+        allow_identical=False,
+    )
+
+    card["acting"] = "Cal looks at the cup.\nCal steadies his gaze."
+    write_json(shot_path, card)
+    prompt_2 = compile_prompt(project, shot_path)
+    result_2 = project / "generations/attempt-2.bin"
+    result_2.write_bytes(b"attempt two")
+    with pytest.raises(StudioError, match="exactly one prompt line"):
+        log_attempt(
+            project,
+            shot_id="SC01-SH01",
+            prompt_path=prompt_2,
+            result_path=result_2,
             verdict="rejected",
             changed_block="character_acting",
             qa=None,
@@ -337,6 +576,70 @@ def test_attempt_log_detects_tampered_prompt_hashes(tmp_path: Path) -> None:
             qa=None,
             allow_identical=False,
         )
+
+
+def test_attempt_log_rejects_tampered_previous_prompt(tmp_path: Path) -> None:
+    project, shot_path = ready_project(tmp_path)
+    prompt_1 = compile_prompt(project, shot_path)
+    result_1 = project / "generations/attempt-1.bin"
+    result_1.write_bytes(b"attempt one")
+    log_attempt(
+        project,
+        shot_id="SC01-SH01",
+        prompt_path=prompt_1,
+        result_path=result_1,
+        verdict="rejected",
+        changed_block="initial",
+        qa=None,
+        allow_identical=False,
+    )
+
+    card = read_json(shot_path)
+    card["acting"] = "Cal blinks once and steadies his gaze."
+    write_json(shot_path, card)
+    prompt_2 = compile_prompt(project, shot_path)
+    prompt_1_value = read_json(prompt_1)
+    prompt_1_value["render_text"] = read_json(prompt_2)["render_text"]
+    write_json(prompt_1, prompt_1_value)
+    result_2 = project / "generations/attempt-2.bin"
+    result_2.write_bytes(b"attempt two")
+
+    with pytest.raises(StudioError, match="previous attempt prompt"):
+        log_attempt(
+            project,
+            shot_id="SC01-SH01",
+            prompt_path=prompt_2,
+            result_path=result_2,
+            verdict="rejected",
+            changed_block="character_acting",
+            qa=None,
+            allow_identical=False,
+        )
+
+
+def test_audit_rejects_tampered_logged_prompt(tmp_path: Path) -> None:
+    project, shot_path = ready_project(tmp_path)
+    prompt_path = compile_prompt(project, shot_path)
+    result = project / "generations/attempt.bin"
+    result.write_bytes(b"attempt")
+    log_attempt(
+        project,
+        shot_id="SC01-SH01",
+        prompt_path=prompt_path,
+        result_path=result,
+        verdict="rejected",
+        changed_block="initial",
+        qa=None,
+        allow_identical=False,
+    )
+    prompt = read_json(prompt_path)
+    prompt["blocks"][0]["text"] = "Tampered scene context."
+    write_json(prompt_path, prompt)
+
+    report = audit_project(project)
+
+    assert not report.passed
+    assert any("logged prompt integrity failed" in error for error in report.errors)
 
 
 def test_attempt_result_must_live_in_generations(tmp_path: Path) -> None:
@@ -374,7 +677,19 @@ def test_audit_flags_locked_asset_with_degraded_evidence(tmp_path: Path) -> None
     write_json(stress_path, evidence)
     report = audit_project(project)
     assert not report.passed
-    assert any("lost its 10/10 evidence" in error for error in report.errors)
+    assert any("exactly 10/10" in error for error in report.errors)
+
+
+def test_gate_rechecks_locked_stress_result_files(tmp_path: Path) -> None:
+    project, shot_path = ready_project(tmp_path)
+    evidence = read_json(project / "assets/characters/cal/stress-test.json")
+    missing_result = project / evidence["cases"][0]["result"]
+    missing_result.unlink()
+
+    report = gate_shot(project, shot_path)
+
+    assert not report.passed
+    assert any("stress-test result file is missing" in error for error in report.errors)
 
 
 def test_variant_of_requires_registered_base(tmp_path: Path) -> None:
@@ -407,22 +722,29 @@ def test_board_decision_rejects_unknown_status(tmp_path: Path) -> None:
 
 def test_rejected_attempt_15_stops_further_iteration(tmp_path: Path) -> None:
     project, shot_path = ready_project(tmp_path)
-    prompt = compile_prompt(project, shot_path)
     result = project / "generations/rejected.bin"
     result.write_bytes(b"rejected")
     row = None
     for attempt in range(1, 16):
+        card = read_json(shot_path)
+        card["acting"] = f"Cal holds his gaze for attempt {attempt}."
+        write_json(shot_path, card)
+        prompt = compile_prompt(project, shot_path)
         row = log_attempt(
             project,
             shot_id="SC01-SH01",
             prompt_path=prompt,
             result_path=result,
             verdict="rejected",
-            changed_block="initial" if attempt == 1 else "seed_only",
+            changed_block="initial" if attempt == 1 else "character_acting",
             qa=None,
-            allow_identical=attempt > 1,
+            allow_identical=False,
         )
     assert row is not None and row["simplify_required"]
+    card = read_json(shot_path)
+    card["acting"] = "Cal holds his gaze for attempt 16."
+    write_json(shot_path, card)
+    prompt = compile_prompt(project, shot_path)
     with pytest.raises(StudioError, match="simplify or split"):
         log_attempt(
             project,
@@ -430,7 +752,7 @@ def test_rejected_attempt_15_stops_further_iteration(tmp_path: Path) -> None:
             prompt_path=prompt,
             result_path=result,
             verdict="rejected",
-            changed_block="seed_only",
+            changed_block="character_acting",
             qa=None,
-            allow_identical=True,
+            allow_identical=False,
         )

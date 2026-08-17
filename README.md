@@ -37,9 +37,10 @@ budget, that a specific model is exclusive to one provider, or that a model can 
 - Machina's exact 15-block positive prompt order
 - 10 to 15 second shots and 0.3 to 0.8 second action beats
 - One-line-change enforcement between attempts, recomputed from the compiled prompt text
+- Version allocation that never reuses or overwrites an existing compiled prompt
 - Automatic “simplify the shot” flag on rejected attempt 15, with audit warnings from attempt 10
 - Checklist-controlled promotion from `generations/` into per-scene `selects/` folders
-- A read-only project audit that re-verifies locked-asset stress evidence
+- A read-only project audit that re-verifies visual references and locked-asset stress evidence
 - A pinned-upstream drift guard, `scripts/check_upstream_pin.py`, enforced in CI
 - A Higgsfield adapter that discovers the live catalog instead of hardcoding model names
 
@@ -61,19 +62,10 @@ uv run continuity-film shot-template productions/demo --shot-id SC01-SH01
 uv run continuity-film audit productions/demo
 ```
 
-**Claude Code needs no install step.** The repository ships `.claude/skills/` with relative symlinks to all
-eight skills (Machina's seven plus the enforcer), so any session started inside a recursive clone has them
-project-scoped, and no skill leaks into the global namespace. Symlinks require a POSIX checkout.
-
-For Codex, install the seven upstream skills and the local enforcement overlay:
-
-```bash
-npx skills add ./upstream/machina-film-studio-skills
-uv run python scripts/install_skills.py
-```
-
-The local installer only adds `continuity-film-enforcer` as a symlink and refuses to replace any existing
-skill.
+**Claude Code and Codex need no install step.** The repository ships `.claude/skills/` and `.agents/skills/`
+with relative symlinks to all eight skills (Machina's seven plus the enforcer). Sessions started inside a
+recursive clone discover them project-scoped, without changing either global skill library. Symlinks require a
+POSIX checkout.
 
 The first audit is expected to show draft state. Run the upstream workflow in this order:
 

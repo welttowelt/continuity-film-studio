@@ -47,9 +47,8 @@ PROMPT_BLOCK_NAMES = (
 )
 
 VISUAL_BIBLE_DECISIONS = (
-    "style",
-    "palette",
     "lighting",
+    "palette",
     "optics",
     "camera_movement",
     "texture",
@@ -91,6 +90,8 @@ class GateReport:
 
 def validate_shot_card(card: dict[str, Any]) -> list[str]:
     errors: list[str] = []
+    allowed_fields = {*SHOT_FIELDS, "prompt_prep"}
+    errors.extend(f"unexpected shot field: {field_name}" for field_name in sorted(set(card) - allowed_fields))
     for field_name in SHOT_FIELDS:
         if field_name not in card:
             errors.append(f"missing shot field: {field_name}")

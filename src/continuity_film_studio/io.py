@@ -53,5 +53,9 @@ def sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def relative_to_project(project: Path, value: Path) -> str:
     return str(value.resolve().relative_to(project.resolve()))

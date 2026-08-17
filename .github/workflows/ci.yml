@@ -33,5 +33,11 @@ jobs:
           for skill in upstream/machina-film-studio-skills/skills/*; do
             python scripts/quick_validate_skill.py --source-only "$skill"
           done
+      - name: Validate project-scoped skill links
+        run: |
+          for skill in .agents/skills/* .claude/skills/*; do
+            test -L "$skill"
+            test -d "$skill"
+          done
       - name: Verify upstream pin manifest
         run: uv run python scripts/check_upstream_pin.py

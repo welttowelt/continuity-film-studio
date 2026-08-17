@@ -57,6 +57,7 @@ continuity-film higgsfield-render \
   --attachment-map attachment-map.json
 ```
 
-The adapter refuses to submit a prompt with unmapped reference files. Add `--execute` only when a generation is
-authorized. It invokes the official binary with an argument array rather than shell interpolation, so prompt text
-is not executed by a shell.
+The adapter refuses to submit a prompt with unmapped reference files. It also rechecks prompt integrity, the live
+shot gate, and the hashed source state before rendering. Add `--execute` only when a generation is authorized. It
+invokes the official `higgsfield` binary with an argument array rather than shell interpolation, so prompt text is
+not executed by a shell.

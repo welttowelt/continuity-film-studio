@@ -6,7 +6,16 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from .io import append_jsonl, read_json, read_jsonl, relative_to_project, sha256_text, utc_now, write_json
+from .io import (
+    append_jsonl,
+    read_json,
+    read_jsonl,
+    relative_to_project,
+    sha256_file,
+    sha256_text,
+    utc_now,
+    write_json,
+)
 from .models import (
     ASSET_TYPES,
     PROMPT_BLOCK_NAMES,
@@ -103,22 +112,38 @@ def init_project(project: Path, name: str, provider: str, distribution: str) -> 
     (project / "docs/generation-log.jsonl").touch()
     (project / "docs/breakdown.md").write_text(
         "# Breakdown\n\n"
-        "| scene id | summary | location | time of day | characters | props | shot-card file | status |\n"
+        "## Scenes\n\n"
+        "| Scene ID | Summary | Location | Time of day | Characters | Props | Shot-card file | Status |\n"
         "|---|---|---|---|---|---|---|---|\n",
         encoding="utf-8",
     )
     (project / "docs/bible.md").write_text(
-        "# Visual bible\n\nRecord approved reference-board decisions here.\n",
+        "# Visual Bible\n\n## Asset boards\n\n## Style boards\n\n## Ban list\n",
         encoding="utf-8",
     )
     (project / "docs/registry.md").write_text(
-        "# Asset registry\n\n| tag | type | version | seed file | scenes | status |\n"
+        "# Asset Registry\n\n| Tag | Type | Version | Seed file | Scenes | Status |\n"
         "|---|---|---|---|---|---|\n",
         encoding="utf-8",
     )
     (project / "docs/generation-log.md").write_text(
-        "# Generation log\n\n| shot id | prompt version | what changed | result | verdict |\n"
+        "# Generation Log\n\n| Shot ID | Prompt version | What changed | Result | Verdict |\n"
         "|---|---|---|---|---|\n",
+        encoding="utf-8",
+    )
+    (project / "docs/README").write_text(
+        f"# {name} studio\n\n"
+        "## Folder map\n\n"
+        "- `assets/` stores character, location, and prop passports and references.\n"
+        "- `prompts/` stores shot cards and versioned generation prompts.\n"
+        "- `generations/` stores raw attempts.\n"
+        "- `selects/` stores approved takes for the edit.\n"
+        "- `edit/`, `color/`, `sound/`, and `master/` form the finishing chain.\n"
+        "- `docs/` stores the breakdown, visual bible, registry, and generation log.\n\n"
+        "## Studio laws\n\n"
+        "1. Only `/selects/` is visible to the edit.\n"
+        "2. Nobody but the prompt engineer enters `/generations/`.\n"
+        "3. Reference files are never renamed; a new version is a new file.\n",
         encoding="utf-8",
     )
     (project / "README.md").write_text(
@@ -416,6 +441,103 @@ def registry_row(project: Path, tag: str) -> dict[str, Any]:
     raise StudioError(f"asset is not registered: {tag}")
 
 
+def _stress_evidence_errors(project: Path, row: dict[str, Any], report: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    cases = report.get("cases", [])
+    if not isinstance(cases, list):
+        return ["stress-test cases must be a list"]
+
+    required = stress_requirement(row["type"])
+    passed = sum(isinstance(case, dict) and case.get("verdict") == "pass" for case in cases)
+    if row["type"] == "character" and (len(cases) != required or passed != required):
+        errors.append(f"character requires exactly 10/10 passing attempts: {passed}/{len(cases)}")
+    if row["type"] != "character" and (not cases or passed != len(cases)):
+        errors.append(f"asset test matrix must contain only passing cases: {passed}/{len(cases)}")
+    if row["type"] != "character" and report.get("lock_decision") != "approved":
+        errors.append("location and prop locks require an explicit approved decision")
+    if row["type"] != "character" and not str(report.get("lock_decision_by", "")).strip():
+        errors.append("location and prop locks require the decision-maker's name")
+    if not str(report.get("reviewer", "")).strip():
+        errors.append("stress test requires a named reviewer")
+
+    identifiers = [str(case.get("id", "")).strip() for case in cases if isinstance(case, dict)]
+    conditions = [str(case.get("condition", "")).strip() for case in cases if isinstance(case, dict)]
+    if len(identifiers) != len(cases) or not all(identifiers) or len(set(identifiers)) != len(identifiers):
+        errors.append("stress-test case ids must be non-empty and unique")
+    if (
+        len(conditions) != len(cases)
+        or not all(conditions)
+        or len(set(conditions)) != len(conditions)
+        or any(condition == "Describe the production condition." for condition in conditions)
+    ):
+        errors.append("stress-test conditions must be unique production conditions, not placeholders")
+
+    required_case_fields = ("angle", "shot_size", "scene_lighting", "prompt", "result")
+    placeholders = {
+        "Describe the test angle.",
+        "Describe the test shot size.",
+        "Describe the actual scene lighting.",
+        "Paste the complete static-image test prompt.",
+        "Record the versioned result path.",
+    }
+    passport_dir = (project / row["passport_file"]).parent.resolve()
+    for case in cases:
+        if not isinstance(case, dict):
+            errors.append("every stress-test row must be an object")
+            continue
+        values = {field: str(case.get(field, "")).strip() for field in required_case_fields}
+        if any(not values[field] for field in required_case_fields):
+            errors.append("every stress-test row requires angle, shot size, lighting, prompt, and result")
+            continue
+        if any(values[field] in placeholders for field in required_case_fields):
+            errors.append("stress-test rows must replace every matrix placeholder")
+            continue
+        result_value = Path(values["result"])
+        if result_value.is_absolute():
+            errors.append(f"stress-test result must be project-relative: {result_value}")
+            continue
+        result_path = (project / result_value).resolve()
+        try:
+            result_path.relative_to(passport_dir)
+        except ValueError:
+            errors.append(f"stress-test result must live beside the passport: {result_value}")
+            continue
+        if not result_path.is_file():
+            errors.append(f"stress-test result file is missing: {result_value}")
+    return list(dict.fromkeys(errors))
+
+
+def _locked_asset_errors(project: Path, row: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    passport_path = project / row["passport_file"]
+    if not passport_path.is_file():
+        return [f"missing passport: {row['tag']}"]
+    passport = read_json(passport_path)
+    if passport.get("status") != "locked":
+        errors.append(f"registry/passport status mismatch: {row['tag']}")
+
+    stress_value = row.get("stress_test_file")
+    stress_path = project / stress_value if isinstance(stress_value, str) and stress_value else None
+    if stress_path is None or not stress_path.is_file():
+        errors.append(f"locked asset has no stress-test evidence: {row['tag']}")
+    else:
+        evidence = read_json(stress_path)
+        errors.extend(
+            f"locked asset evidence is invalid for {row['tag']}: {evidence_error}"
+            for evidence_error in _stress_evidence_errors(project, row, evidence)
+        )
+
+    rights = passport.get("rights", {})
+    if rights.get("state") == "denied":
+        errors.append(f"asset rights are denied: {row['tag']}")
+    if rights.get("real_person") and not rights.get("identity_authorized"):
+        errors.append(f"real-person identity authorization is missing: {row['tag']}")
+    distribution = read_json(project / "config/project.json").get("distribution")
+    if distribution == "commercial" and rights.get("state") != "confirmed":
+        errors.append(f"commercial projects require confirmed asset rights: {row['tag']}")
+    return errors
+
+
 def lock_asset(project: Path, tag: str) -> None:
     project = ensure_project(project)
     row = registry_row(project, tag)
@@ -424,42 +546,9 @@ def lock_asset(project: Path, tag: str) -> None:
     if not row.get("stress_test_file"):
         raise StudioError(f"asset has no recorded stress test: {tag}")
     report = read_json(project / row["stress_test_file"])
-    cases = report.get("cases", [])
-    required = stress_requirement(row["type"])
-    passed = sum(case.get("verdict") == "pass" for case in cases)
-    if row["type"] == "character" and (len(cases) != required or passed != required):
-        raise StudioError(f"character requires exactly 10/10 passing attempts: {passed}/{len(cases)}")
-    if row["type"] != "character" and (not cases or passed != len(cases)):
-        raise StudioError(f"asset test matrix must contain only passing cases: {passed}/{len(cases)}")
-    if row["type"] != "character" and report.get("lock_decision") != "approved":
-        raise StudioError("location and prop locks require an explicit approved decision")
-    if row["type"] != "character" and not str(report.get("lock_decision_by", "")).strip():
-        raise StudioError("location and prop locks require the decision-maker's name")
-    if not str(report.get("reviewer", "")).strip():
-        raise StudioError("stress test requires a named reviewer")
-    identifiers = [str(case.get("id", "")).strip() for case in cases]
-    conditions = [str(case.get("condition", "")).strip() for case in cases]
-    if not all(identifiers) or len(set(identifiers)) != len(identifiers):
-        raise StudioError("stress-test case ids must be non-empty and unique")
-    if (
-        not all(conditions)
-        or len(set(conditions)) != len(conditions)
-        or any(condition == "Describe the production condition." for condition in conditions)
-    ):
-        raise StudioError("stress-test conditions must be unique production conditions, not placeholders")
-    required_case_fields = ("angle", "shot_size", "scene_lighting", "prompt", "result")
-    placeholders = (
-        "Describe the test angle.",
-        "Describe the test shot size.",
-        "Describe the actual scene lighting.",
-        "Paste the complete static-image test prompt.",
-        "Record the versioned result path.",
-    )
-    for case in cases:
-        if any(not str(case.get(field, "")).strip() for field in required_case_fields):
-            raise StudioError("every stress-test row requires angle, shot size, lighting, prompt, and result")
-        if any(str(case.get(field, "")).strip() in placeholders for field in required_case_fields):
-            raise StudioError("stress-test rows must replace every matrix placeholder")
+    evidence_errors = _stress_evidence_errors(project, row, report)
+    if evidence_errors:
+        raise StudioError("; ".join(evidence_errors))
 
     rights = passport.get("rights", {})
     if rights.get("state") == "denied":
@@ -480,6 +569,95 @@ def lock_asset(project: Path, tag: str) -> None:
     write_json(project / "docs/registry.json", registry)
 
 
+def _visual_bible_source_paths(project: Path, bible: dict[str, Any]) -> list[Path]:
+    paths: list[Path] = []
+    for board_value in bible.get("source_boards", {}).values():
+        if not isinstance(board_value, str) or not board_value or Path(board_value).is_absolute():
+            continue
+        board_path = (project / board_value).resolve()
+        try:
+            board_path.relative_to(project)
+        except ValueError:
+            continue
+        if not board_path.is_file():
+            continue
+        paths.append(board_path)
+        board = read_json(board_path)
+        for entry in [*board.get("references", []), *board.get("anti_references", [])]:
+            if not isinstance(entry, dict):
+                continue
+            reference_value = entry.get("file")
+            if (
+                not isinstance(reference_value, str)
+                or not reference_value
+                or Path(reference_value).is_absolute()
+            ):
+                continue
+            paths.append((project / reference_value).resolve())
+    return paths
+
+
+def _visual_bible_errors(project: Path, bible: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    decisions = bible.get("decisions", {})
+    source_boards = bible.get("source_boards", {})
+    if not isinstance(decisions, dict) or set(decisions) != set(VISUAL_BIBLE_DECISIONS):
+        errors.append("visual bible must contain exactly the seven upstream decision categories")
+        return errors
+    if not isinstance(source_boards, dict) or set(source_boards) != set(VISUAL_BIBLE_DECISIONS):
+        errors.append("visual bible must link exactly one source board for each decision category")
+        return errors
+
+    for key in VISUAL_BIBLE_DECISIONS:
+        if not str(decisions.get(key, "")).strip():
+            errors.append(f"visual-bible decision is empty: {key}")
+        board_value = source_boards.get(key)
+        if not isinstance(board_value, str) or not board_value or Path(board_value).is_absolute():
+            errors.append(f"visual-bible source board path is invalid: {key}")
+            continue
+        board_path = (project / board_value).resolve()
+        try:
+            board_path.relative_to(project)
+        except ValueError:
+            errors.append(f"visual-bible source board escapes the project: {board_value}")
+            continue
+        if not board_path.is_file():
+            errors.append(f"visual-bible source board is missing: {board_value}")
+            continue
+        board = read_json(board_path)
+        if board.get("status") != "approved" or board.get("decision") != decisions.get(key):
+            errors.append(f"visual-bible decision drifted from source board: {key}")
+        references = board.get("references", [])
+        anti_references = board.get("anti_references", [])
+        if not isinstance(references, list) or not references:
+            errors.append(f"visual-bible source board has no positive reference: {key}")
+            continue
+        if not isinstance(anti_references, list):
+            errors.append(f"visual-bible anti-references must be a list: {key}")
+            continue
+        for entry in [*references, *anti_references]:
+            if not isinstance(entry, dict) or not str(entry.get("caption", "")).strip():
+                errors.append(f"visual-bible reference is missing its caption: {key}")
+                continue
+            reference_value = entry.get("file")
+            if (
+                not isinstance(reference_value, str)
+                or not reference_value
+                or Path(reference_value).is_absolute()
+            ):
+                errors.append(f"visual-bible reference path is invalid: {key}")
+                continue
+            reference_path = (project / reference_value).resolve()
+            try:
+                reference_path.relative_to(project)
+            except ValueError:
+                errors.append(f"visual-bible reference escapes the project: {reference_value}")
+                continue
+            if not reference_path.is_file():
+                errors.append(f"visual-bible reference is missing: {reference_value}")
+    return list(dict.fromkeys(errors))
+
+
 def gate_shot(project: Path, shot_path: Path) -> GateReport:
     project = ensure_project(project)
     card = read_json(shot_path)
@@ -488,6 +666,8 @@ def gate_shot(project: Path, shot_path: Path) -> GateReport:
     bible = read_json(project / "docs/visual-bible.json")
     if bible.get("status") != "approved":
         errors.append("visual bible is not approved")
+    else:
+        errors.extend(_visual_bible_errors(project, bible))
 
     checked_assets = shot_asset_tags(card)
     for tag in checked_assets:
@@ -498,6 +678,27 @@ def gate_shot(project: Path, shot_path: Path) -> GateReport:
             continue
         if row.get("status") != "locked":
             errors.append(f"asset is not locked: {tag}")
+        else:
+            errors.extend(_locked_asset_errors(project, row))
+
+    stateful_assets: list[dict[str, Any]] = []
+    if isinstance(card.get("location"), dict):
+        stateful_assets.append(card["location"])
+    stateful_assets.extend(
+        asset for asset in [*card.get("characters", []), *card.get("props", [])] if isinstance(asset, dict)
+    )
+    for asset in stateful_assets:
+        if not asset.get("tag"):
+            continue
+        state = str(asset.get("state", "base")).strip() or "base"
+        if state == "base":
+            continue
+        try:
+            passport = _passport(project, asset["tag"])
+        except StudioError:
+            continue
+        if not passport.get("variant_of"):
+            errors.append(f"state {state} requires its own registered variant tag")
 
     if not card.get("prompt_prep", {}).get("text_tasks"):
         warnings.append("no edit-stage text tasks recorded; confirm that no required text appears in-frame")
@@ -538,6 +739,13 @@ def _render_text(blocks: list[dict[str, Any]]) -> str:
 
 def _verify_prompt_integrity(prompt: dict[str, Any], prompt_path: Path) -> None:
     blocks = prompt.get("blocks", [])
+    if (
+        not isinstance(blocks, list)
+        or tuple(block.get("name") for block in blocks if isinstance(block, dict)) != PROMPT_BLOCK_NAMES
+    ):
+        raise StudioError(f"compiled prompt integrity failed: invalid 15-block order in {prompt_path}")
+    if any(not isinstance(block.get("text"), str) for block in blocks):
+        raise StudioError(f"compiled prompt integrity failed: block text is invalid in {prompt_path}")
     computed_hashes = {block["name"]: sha256_text(block["text"]) for block in blocks}
     if computed_hashes != prompt.get("block_hashes"):
         raise StudioError(f"prompt block hashes do not match the block text, recompile: {prompt_path}")
@@ -546,23 +754,84 @@ def _verify_prompt_integrity(prompt: dict[str, Any], prompt_path: Path) -> None:
         raise StudioError(f"prompt render text does not match its blocks, recompile: {prompt_path}")
 
 
-def _changed_lines(previous_text: str, current_text: str) -> tuple[int, int, str | None]:
-    matcher = difflib.SequenceMatcher(
-        None, previous_text.splitlines(), current_text.splitlines(), autojunk=False
-    )
-    removed = 0
-    added = 0
-    changed_line: str | None = None
-    for operation, old_start, old_end, new_start, new_end in matcher.get_opcodes():
-        if operation == "equal":
-            continue
-        removed += old_end - old_start
-        added += new_end - new_start
-        if new_end > new_start:
-            changed_line = current_text.splitlines()[new_end - 1]
-        elif changed_line is None:
-            changed_line = f"[removed] {previous_text.splitlines()[old_end - 1]}"
-    return removed, added, changed_line
+def _source_state_hashes(project: Path, shot_path: Path, card: dict[str, Any]) -> dict[str, str]:
+    bible = read_json(project / "docs/visual-bible.json")
+    source_paths = [
+        project / "config/project.json",
+        project / "docs/visual-bible.json",
+        shot_path,
+        *_visual_bible_source_paths(project, bible),
+    ]
+    for tag in shot_asset_tags(card):
+        row = registry_row(project, tag)
+        passport_path = project / row["passport_file"]
+        source_paths.append(passport_path)
+        passport = read_json(passport_path)
+        source_paths.extend(project / reference for reference in passport.get("reference_files", []))
+        if row.get("stress_test_file"):
+            stress_path = project / row["stress_test_file"]
+            source_paths.append(stress_path)
+            stress = read_json(stress_path)
+            source_paths.extend(
+                project / case["result"]
+                for case in stress.get("cases", [])
+                if isinstance(case, dict) and isinstance(case.get("result"), str)
+            )
+
+    hashes: dict[str, str] = {}
+    for source_path in source_paths:
+        try:
+            relative = relative_to_project(project, source_path)
+        except ValueError as exc:
+            raise StudioError(f"compiled prompt source escapes the project: {source_path}") from exc
+        if not source_path.is_file():
+            raise StudioError(f"compiled prompt source is missing: {relative}")
+        hashes[relative] = sha256_file(source_path)
+    return dict(sorted(hashes.items()))
+
+
+def validate_render_prompt(prompt_path: Path) -> tuple[Path, dict[str, Any]]:
+    prompt_path = prompt_path.resolve()
+    project = ensure_project(prompt_path.parents[2])
+    try:
+        prompt_path.relative_to((project / "prompts/compiled").resolve())
+    except ValueError as exc:
+        raise StudioError("compiled prompt must live inside prompts/compiled/") from exc
+
+    prompt = read_json(prompt_path)
+    _verify_prompt_integrity(prompt, prompt_path)
+    source_value = prompt.get("source_shot_card")
+    if not isinstance(source_value, str) or not source_value:
+        raise StudioError("compiled prompt integrity failed: source shot card is missing")
+    source_shot = (project / source_value).resolve()
+    try:
+        source_shot.relative_to(project)
+    except ValueError as exc:
+        raise StudioError("compiled prompt source shot card escapes the project") from exc
+    if not source_shot.is_file():
+        raise StudioError(f"compiled prompt source shot card is missing: {source_shot}")
+    gate = gate_shot(project, source_shot)
+    if not gate.passed:
+        raise StudioError("compiled prompt shot gate failed: " + "; ".join(gate.errors))
+    card = read_json(source_shot)
+    if prompt.get("shot_id") != card.get("shot_id"):
+        raise StudioError("compiled prompt shot id no longer matches its source card")
+    if prompt.get("source_hashes") != _source_state_hashes(project, source_shot, card):
+        raise StudioError("compiled prompt source state changed; recompile before rendering")
+    return project, prompt
+
+
+def _single_changed_line(previous_text: str, current_text: str) -> str | None:
+    previous_lines = previous_text.splitlines()
+    current_lines = current_text.splitlines()
+    matcher = difflib.SequenceMatcher(None, previous_lines, current_lines, autojunk=False)
+    changes = [opcode for opcode in matcher.get_opcodes() if opcode[0] != "equal"]
+    if len(changes) != 1:
+        return None
+    operation, old_start, old_end, new_start, new_end = changes[0]
+    if operation != "replace" or old_end - old_start != 1 or new_end - new_start != 1:
+        return None
+    return current_lines[new_start]
 
 
 def compile_prompt(project: Path, shot_path: Path) -> Path:
@@ -708,8 +977,9 @@ def compile_prompt(project: Path, shot_path: Path) -> Path:
         {
             "name": "style_prefix",
             "text": (
-                f"{bible['decisions']['style']} {bible['decisions']['texture']} "
-                f"Style device: {card['style_device']}. 60:30:10 palette: {bible['decisions']['palette']}"
+                f"Texture: {bible['decisions']['texture']}. Lighting: {bible['decisions']['lighting']}. "
+                f"Optics: {bible['decisions']['optics']}. Style device: {card['style_device']}. "
+                f"60:30:10 palette: {bible['decisions']['palette']}"
             ),
         },
         {
@@ -734,9 +1004,16 @@ def compile_prompt(project: Path, shot_path: Path) -> Path:
         raise StudioError("compiled prompt block order drifted from the schema")
     render_text = _render_text(blocks)
     output_dir = project / "prompts/compiled"
-    existing = sorted(output_dir.glob(f"{card['shot_id']}-v*.json"))
-    version = len(existing) + 1
+    versions: list[int] = []
+    prefix = f"{card['shot_id']}-v"
+    for candidate in output_dir.glob(f"{prefix}*.json"):
+        suffix = candidate.stem.removeprefix(prefix)
+        if suffix.isdigit():
+            versions.append(int(suffix))
+    version = max(versions, default=0) + 1
     output = output_dir / f"{card['shot_id']}-v{version:03d}.json"
+    if output.exists():
+        raise StudioError(f"refusing to overwrite compiled prompt: {output}")
     write_json(
         output,
         {
@@ -744,6 +1021,7 @@ def compile_prompt(project: Path, shot_path: Path) -> Path:
             "version": version,
             "created_at": utc_now(),
             "source_shot_card": relative_to_project(project, shot_path),
+            "source_hashes": _source_state_hashes(project, shot_path, card),
             "blocks": blocks,
             "block_hashes": {block["name"]: sha256_text(block["text"]) for block in blocks},
             "attachments": attachments,
@@ -766,10 +1044,15 @@ def log_attempt(
     allow_identical: bool,
 ) -> dict[str, Any]:
     project = ensure_project(project)
-    prompt = read_json(prompt_path)
+    if allow_identical:
+        raise StudioError(
+            "exactly one prompt line must be replaced; identical seed-only retries are disabled"
+        )
+    prompt_project, prompt = validate_render_prompt(prompt_path)
+    if prompt_project != project:
+        raise StudioError("compiled prompt belongs to a different continuity film project")
     if prompt.get("shot_id") != shot_id:
         raise StudioError("prompt shot id does not match")
-    _verify_prompt_integrity(prompt, prompt_path)
     if not result_path.is_file():
         raise StudioError(f"result file does not exist: {result_path}")
     try:
@@ -798,16 +1081,20 @@ def log_attempt(
         previous_prompt_path = project / attempts[-1]["prompt_file"]
         if not previous_prompt_path.is_file():
             raise StudioError(f"previous attempt prompt file is missing: {previous_prompt_path}")
-        removed, added, changed_line = _changed_lines(
-            read_json(previous_prompt_path).get("render_text", ""), prompt["render_text"]
-        )
-        if removed > 1 or added > 1:
+        previous_prompt = read_json(previous_prompt_path)
+        try:
+            _verify_prompt_integrity(previous_prompt, previous_prompt_path)
+        except StudioError as exc:
+            raise StudioError(f"previous attempt prompt integrity failed: {exc}") from exc
+        if previous_prompt.get("render_text_sha256") != attempts[-1].get(
+            "prompt_sha256"
+        ) or previous_prompt.get("block_hashes") != attempts[-1].get("block_hashes"):
+            raise StudioError("previous attempt prompt no longer matches the immutable generation log")
+        changed_line = _single_changed_line(previous_prompt.get("render_text", ""), prompt["render_text"])
+        if changed_line is None:
             raise StudioError(
-                "more than one prompt line changed. The upstream law is one changed line per attempt "
-                "with every other line kept verbatim"
+                "exactly one prompt line must be replaced per attempt, with every other line kept verbatim"
             )
-        if not changed_names and not allow_identical:
-            raise StudioError("no prompt block changed; use --allow-identical for a seed-only rerun")
         if changed_names and changed_block != changed_names[0]:
             raise StudioError(f"declared changed block does not match content: {changed_names[0]}")
 
@@ -864,6 +1151,43 @@ def accept_take(project: Path, shot_id: str, attempt_number: int) -> Path:
     return output
 
 
+def _attempt_integrity_errors(project: Path, row: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    prompt_value = row.get("prompt_file")
+    if not isinstance(prompt_value, str) or not prompt_value or Path(prompt_value).is_absolute():
+        return ["generation log has an invalid prompt path"]
+    prompt_path = (project / prompt_value).resolve()
+    try:
+        prompt_path.relative_to((project / "prompts/compiled").resolve())
+    except ValueError:
+        return [f"logged prompt escapes prompts/compiled/: {prompt_value}"]
+    if not prompt_path.is_file():
+        return [f"logged prompt is missing: {prompt_value}"]
+    prompt = read_json(prompt_path)
+    try:
+        _verify_prompt_integrity(prompt, prompt_path)
+    except StudioError as exc:
+        errors.append(f"logged prompt integrity failed: {exc}")
+    if prompt.get("render_text_sha256") != row.get("prompt_sha256") or prompt.get("block_hashes") != row.get(
+        "block_hashes"
+    ):
+        errors.append(f"logged prompt no longer matches the attempt record: {prompt_value}")
+
+    result_value = row.get("result_file")
+    if not isinstance(result_value, str) or not result_value or Path(result_value).is_absolute():
+        errors.append("generation log has an invalid result path")
+        return errors
+    result_path = (project / result_value).resolve()
+    try:
+        result_path.relative_to((project / "generations").resolve())
+    except ValueError:
+        errors.append(f"logged result escapes generations/: {result_value}")
+    else:
+        if not result_path.is_file():
+            errors.append(f"logged result is missing: {result_value}")
+    return errors
+
+
 def audit_project(project: Path) -> GateReport:
     project = ensure_project(project)
     errors: list[str] = []
@@ -875,6 +1199,8 @@ def audit_project(project: Path) -> GateReport:
     bible = read_json(project / "docs/visual-bible.json")
     if bible.get("status") != "approved":
         warnings.append("visual bible is still draft")
+    else:
+        errors.extend(_visual_bible_errors(project, bible))
     for row in registry.get("assets", []):
         passport_path = project / row["passport_file"]
         if not passport_path.is_file():
@@ -884,24 +1210,8 @@ def audit_project(project: Path) -> GateReport:
         for reference in passport.get("reference_files", []):
             if not (project / reference).is_file():
                 errors.append(f"missing reference for {row['tag']}: {reference}")
-        if row.get("status") == "locked" and passport.get("status") != "locked":
-            errors.append(f"registry/passport status mismatch: {row['tag']}")
         if row.get("status") == "locked":
-            stress_value = row.get("stress_test_file")
-            stress_path = (project / stress_value) if stress_value else None
-            if stress_path is None or not stress_path.is_file():
-                errors.append(f"locked asset has no stress-test evidence: {row['tag']}")
-            else:
-                evidence = read_json(stress_path)
-                cases = evidence.get("cases", [])
-                passed = sum(case.get("verdict") == "pass" for case in cases)
-                required = stress_requirement(row["type"])
-                if row["type"] == "character" and (len(cases) != required or passed != required):
-                    errors.append(f"locked character lost its 10/10 evidence: {row['tag']}")
-                if row["type"] != "character" and (
-                    not cases or passed != len(cases) or evidence.get("lock_decision") != "approved"
-                ):
-                    errors.append(f"locked asset lost its all-pass approved evidence: {row['tag']}")
+            errors.extend(_locked_asset_errors(project, row))
 
     for shot_path in sorted((project / "prompts/shot-cards").glob("*.json")):
         errors.extend(f"{shot_path.name}: {error}" for error in validate_shot_card(read_json(shot_path)))
@@ -910,6 +1220,7 @@ def audit_project(project: Path) -> GateReport:
     attempts = read_jsonl(project / "docs/generation-log.jsonl")
     latest_by_shot: dict[str, dict[str, Any]] = {}
     for row in attempts:
+        errors.extend(_attempt_integrity_errors(project, row))
         latest_by_shot[str(row.get("shot_id", ""))] = row
         if row.get("simplify_required"):
             warnings.append(f"{row['shot_id']} reached attempt {row['attempt']} and must be simplified")

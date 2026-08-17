@@ -32,19 +32,15 @@ The bridge is currently explicit rather than an automatic Markdown parser. Copy 
 templates, preserve canonical descriptors verbatim, and run the gate. Do not report the two representations as
 synchronized until they have been checked.
 
-## Install and verify
+## Discover and verify
 
-Claude Code sessions started inside this repository need no install: `.claude/skills/` symlinks all eight skills
-project-scoped. For Codex:
+Claude Code and Codex sessions started inside this repository need no install. `.claude/skills/` and
+`.agents/skills/` both symlink all eight skills project-scoped. This keeps third-party skills out of global
+libraries. Validate the local overlay with:
 
 ```bash
-npx skills add ./upstream/machina-film-studio-skills
-uv run python scripts/install_skills.py
 uv run python scripts/quick_validate_skill.py skills/continuity-film-enforcer
 ```
-
-Select all seven upstream skills in the installer. The second command installs only the local enforcement overlay
-as a symlink and refuses to replace an existing skill.
 
 ## Update upstream deliberately
 
@@ -72,5 +68,5 @@ mechanical snake_casing of the upstream field labels:
 | Movement | `camera_movement` |
 
 Visual-bible decision keys rename three upstream style categories: light becomes `lighting`, color becomes
-`palette`, and cutting tempo becomes `edit_tempo`. The eighth key, `style`, is a local addition with no upstream
-counterpart, and approval requires it, which is stricter than upstream.
+`palette`, and cutting tempo becomes `edit_tempo`. The other four keys map directly to camera movement, texture,
+optics, and sound. Approval enforces these seven upstream categories without adding a local eighth category.

@@ -45,6 +45,11 @@ def test_render_previews_without_subprocess_and_executes_once(
     write_json(project / "config/project.json", {"project_name": "Test"})
     prompt_path = project / "prompts/compiled/SC01-SH01-v001.json"
     write_json(prompt_path, {"render_text": "Prompt", "attachments": []})
+    monkeypatch.setattr(
+        providers,
+        "validate_render_prompt",
+        lambda path: (project, {"render_text": "Prompt", "attachments": []}),
+    )
 
     monkeypatch.setattr(providers.subprocess, "run", _forbidden_subprocess)
     assert run_cli("higgsfield-render", "--prompt", str(prompt_path), "--model", "test-model") == 0

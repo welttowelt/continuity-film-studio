@@ -6,21 +6,14 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from .io import read_json
 from .models import StudioError
+from .project import validate_render_prompt
 
 RESERVED_ATTACHMENT_FLAGS = {"--execute", "--json", "--model", "--prompt", "--wait"}
 
 
-def _find_project_root(prompt_path: Path) -> Path:
-    for candidate in prompt_path.resolve().parents:
-        if (candidate / "config/project.json").is_file():
-            return candidate
-    raise StudioError("compiled prompt is not inside a continuity film project")
-
-
 def higgsfield_doctor() -> dict[str, Any]:
-    binary = shutil.which("higgsfield") or shutil.which("hf")
+    binary = shutil.which("higgsfield")
     if not binary:
         return {
             "installed": False,
@@ -38,7 +31,7 @@ def higgsfield_doctor() -> dict[str, Any]:
 
 
 def higgsfield_model_catalog() -> Any:
-    binary = shutil.which("higgsfield") or shutil.which("hf")
+    binary = shutil.which("higgsfield")
     if not binary:
         raise StudioError("Higgsfield CLI is not installed")
     result = subprocess.run([binary, "model", "list", "--json"], check=False, capture_output=True, text=True)
@@ -48,7 +41,7 @@ def higgsfield_model_catalog() -> Any:
 
 
 def higgsfield_args(prompt_path: Path, model: str, attachment_map: dict[str, str] | None = None) -> list[str]:
-    prompt = read_json(prompt_path)
+    project, prompt = validate_render_prompt(prompt_path)
     if not model:
         raise StudioError("a model name is required")
     attachments = prompt.get("attachments", [])
@@ -57,7 +50,7 @@ def higgsfield_args(prompt_path: Path, model: str, attachment_map: dict[str, str
             "compiled prompt has reference attachments; provide a model-specific attachment map "
             "after inspecting `higgsfield model get <model> --json`"
         )
-    binary = shutil.which("higgsfield") or shutil.which("hf") or "higgsfield"
+    binary = shutil.which("higgsfield") or "higgsfield"
     args = [
         binary,
         "generate",
@@ -68,7 +61,6 @@ def higgsfield_args(prompt_path: Path, model: str, attachment_map: dict[str, str
         "--wait",
         "--json",
     ]
-    project = _find_project_root(prompt_path)
     for attachment in attachments:
         relative_path = attachment["path"]
         flag = (attachment_map or {}).get(relative_path)
@@ -88,7 +80,7 @@ def higgsfield_args(prompt_path: Path, model: str, attachment_map: dict[str, str
 
 
 def execute_higgsfield(prompt_path: Path, model: str, attachment_map: dict[str, str] | None = None) -> int:
-    if not (shutil.which("higgsfield") or shutil.which("hf")):
+    if not shutil.which("higgsfield"):
         raise StudioError("Higgsfield CLI is not installed")
     args = higgsfield_args(prompt_path, model, attachment_map)
     return subprocess.run(args, check=False).returncode

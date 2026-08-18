@@ -63,6 +63,16 @@ presenter ids: a compiled prompt renders with the tuning it was validated agains
 reconfiguring and recompiling. The stored values are also rechecked when the payload is built, so a
 hand-edited configuration cannot push an out-of-range value into a billable submission.
 
+## Frame fill and caption sidecars
+
+`--fit cover` scales the presenter to fill the output canvas and may crop edges, `--fit contain`
+letterboxes, and omitting the flag lets the provider choose. The provider default letterboxes a
+16:9 avatar look inside a 9:16 canvas, so the vertical lane needs `working_defaults.frame_format`
+set to `9:16` and `--fit cover` configured before compiling. `--caption-srt` requests an SRT
+subtitle sidecar with every render; the file URL appears in the `heygen-status` response and the
+edit stage uses it for word-timed caption chips. Both values live beside the presenter ids in the
+hashed configuration, so changing either means reconfiguring and recompiling.
+
 ## Render
 
 ```bash

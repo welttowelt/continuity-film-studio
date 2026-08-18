@@ -185,6 +185,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--engine-settings-json",
         help='inline JSON of ElevenLabs engine settings, e.g. \'{"model": "eleven_v3", "stability": 0.5}\'',
     )
+    heygen_configure.add_argument(
+        "--fit",
+        choices=("contain", "cover"),
+        help="subject fit to the output canvas: cover fills the frame and may crop edges, "
+        "contain letterboxes; omitted lets the provider choose",
+    )
+    heygen_configure.add_argument(
+        "--caption-srt",
+        action="store_true",
+        help="request an SRT subtitle sidecar with every render",
+    )
 
     heygen_render = subparsers.add_parser("heygen-render", help="preview or execute a HeyGen submission")
     heygen_render.add_argument("--prompt", required=True)
@@ -316,6 +327,8 @@ def run(args: argparse.Namespace) -> int:
             pitch=args.pitch,
             engine_settings=engine_settings,
             expressiveness=args.expressiveness,
+            fit=args.fit,
+            caption_srt=args.caption_srt,
         )
         print(f"configured heygen presenter for {_path(args.project)}")
     elif command == "heygen-render":

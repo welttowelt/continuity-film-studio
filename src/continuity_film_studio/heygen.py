@@ -18,6 +18,7 @@ API_KEY_ENV = "HEYGEN_API_KEY"
 RESOLUTIONS = ("720p", "1080p", "4k")
 ASPECT_RATIOS = ("16:9", "9:16", "4:5", "5:4", "1:1")
 EXPRESSIVENESS_LEVELS = ("high", "medium", "low")
+FIT_MODES = ("contain", "cover")
 VOICE_SPEED_RANGE = (0.5, 1.5)
 VOICE_PITCH_RANGE = (-50, 50)
 ENGINE_UNIT_KEYS = ("stability", "similarity_boost", "style")
@@ -156,6 +157,12 @@ def _validated_expressiveness(value: Any) -> str:
     return value
 
 
+def _validated_fit(value: Any) -> str:
+    if value not in FIT_MODES:
+        raise StudioError(f"fit must be one of: {', '.join(FIT_MODES)}")
+    return value
+
+
 def configure_heygen(
     project: Path,
     *,
@@ -168,6 +175,8 @@ def configure_heygen(
     pitch: float | None = None,
     engine_settings: dict[str, Any] | None = None,
     expressiveness: str | None = None,
+    fit: str | None = None,
+    caption_srt: bool = False,
 ) -> None:
     project = ensure_project(project)
     if not avatar_id.strip() or not voice_id.strip():
@@ -201,6 +210,10 @@ def configure_heygen(
         entry["voice_settings"] = _validated_voice_settings(voice_settings)
     if expressiveness is not None:
         entry["expressiveness"] = _validated_expressiveness(expressiveness)
+    if fit is not None:
+        entry["fit"] = _validated_fit(fit)
+    if caption_srt:
+        entry["caption"] = {"file_format": "srt"}
     providers["heygen"] = entry
     write_json(config_path, config)
 
@@ -246,6 +259,13 @@ def heygen_video_payload(prompt_path: Path, *, resolution: str = "1080p") -> dic
         payload["voice_settings"] = _validated_voice_settings(provider["voice_settings"])
     if provider.get("expressiveness") is not None:
         payload["expressiveness"] = _validated_expressiveness(provider["expressiveness"])
+    if provider.get("fit") is not None:
+        payload["fit"] = _validated_fit(provider["fit"])
+    caption = provider.get("caption")
+    if caption is not None:
+        if not isinstance(caption, dict) or caption.get("file_format") != "srt":
+            raise StudioError('caption must be {"file_format": "srt"}')
+        payload["caption"] = {"file_format": "srt"}
     return payload
 
 

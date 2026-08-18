@@ -188,6 +188,8 @@ def test_configure_stores_voice_tuning_and_payload_carries_it(
         pitch=-2,
         engine_settings=dict(RALPH_ENGINE_SETTINGS),
         expressiveness="high",
+        fit="cover",
+        caption_srt=True,
     )
     prompt_path = compile_prompt(project, shot_path)
     _forbid_requests(monkeypatch)
@@ -198,6 +200,8 @@ def test_configure_stores_voice_tuning_and_payload_carries_it(
         "engine_settings": {"engine_type": "elevenlabs", **RALPH_ENGINE_SETTINGS},
     }
     assert payload["expressiveness"] == "high"
+    assert payload["fit"] == "cover"
+    assert payload["caption"] == {"file_format": "srt"}
 
 
 def test_payload_omits_tuning_that_was_never_configured(
@@ -208,6 +212,22 @@ def test_payload_omits_tuning_that_was_never_configured(
     payload = heygen.heygen_video_payload(prompt_path)
     assert "voice_settings" not in payload
     assert "expressiveness" not in payload
+    assert "fit" not in payload
+    assert "caption" not in payload
+
+
+def test_configure_rejects_invalid_fit(tmp_path: Path) -> None:
+    project, _ = test_project.ready_project(tmp_path)
+    with pytest.raises(StudioError, match="fit must be one of"):
+        heygen.configure_heygen(
+            project,
+            avatar_id="lk_ralph_look_1",
+            voice_id="v_ralph_voice",
+            avatar_name="Ralph",
+            real_person=False,
+            identity_authorized=False,
+            fit="stretch",
+        )
 
 
 @pytest.mark.parametrize(
@@ -301,6 +321,9 @@ def test_cli_configure_wires_voice_tuning_flags(tmp_path: Path, capsys: pytest.C
         "high",
         "--engine-settings-json",
         '{"stability": 0.35, "use_speaker_boost": true}',
+        "--fit",
+        "cover",
+        "--caption-srt",
     ]
     assert run(build_parser().parse_args(argv)) == 0
     provider = read_json(project / "config/project.json")["providers"]["heygen"]
@@ -310,6 +333,8 @@ def test_cli_configure_wires_voice_tuning_flags(tmp_path: Path, capsys: pytest.C
         "engine_settings": {"engine_type": "elevenlabs", "stability": 0.35, "use_speaker_boost": True},
     }
     assert provider["expressiveness"] == "high"
+    assert provider["fit"] == "cover"
+    assert provider["caption"] == {"file_format": "srt"}
     capsys.readouterr()
 
 

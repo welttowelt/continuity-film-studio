@@ -59,7 +59,7 @@ def silences(path: Path, trigger: float) -> list[tuple[float, float]]:
     ).stderr
     starts = [float(m) for m in re.findall(r"silence_start: ([\d.]+)", err)]
     ends = [float(m) for m in re.findall(r"silence_end: ([\d.]+)", err)]
-    return list(zip(starts, ends))
+    return list(zip(starts, ends, strict=False))
 
 
 def keep_windows(duration: float, gaps: list[tuple[float, float]]) -> list[tuple[float, float]]:
